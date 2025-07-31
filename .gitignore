@@ -1,0 +1,7 @@
+# Local binaries & test artefacts
+/bin/
+.DS_Store
+*.log
+*.tmp
+# KIND docker images & kubeconfig if copied here accidentally
+*.tgz
