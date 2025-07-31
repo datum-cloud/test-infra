@@ -67,3 +67,24 @@ install-kyverno:  ## Deploy or upgrade Kyverno idempotently
 .PHONY: wait-ready
 wait-ready:              ## Wait for all deployments, show progress
 	@./hack/wait-ready.sh $(WAIT_TIMEOUT)
+
+# ------------------------------------------------------------------
+# Helpers for CI
+# ------------------------------------------------------------------
+.PHONY: kind-load-image   ## Load one or more images into KIND
+kind-load-image:
+	@if [ -z "$(IMAGES)" ]; then \
+		echo "ERROR: pass IMAGES=\"img1 img2 ...\""; exit 1; \
+	fi
+	@for img in $(IMAGES); do \
+		echo "➡️  Loading $$img into kind '$(CLUSTER_NAME)'"; \
+		docker pull $$img || true; \
+		kind load docker-image $$img --name $(CLUSTER_NAME); \
+	done
+
+.PHONY: kind-save-image   ## Save an image tarball artefact
+kind-save-image:
+	@if [ -z "$(IMAGE)" ] || [ -z "$(TAR)" ]; then \
+		echo "ERROR: set IMAGE=<name> and TAR=<file>"; exit 1; \
+	fi
+	@docker save "$(IMAGE)" | gzip > "$(TAR)"

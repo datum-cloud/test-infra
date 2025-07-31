@@ -1,0 +1,56 @@
+name: kind-bootstrap
+description: Spin up a kind cluster (cert-manager + Flux + Kyverno) and optionally preload images
+
+# ---------- inputs ----------
+inputs:
+  cluster_name:
+    description: "kind cluster name"
+    required: false
+    default: test-infra
+  wait_timeout:
+    description: "Seconds to wait for add-ons to become Ready"
+    required: false
+    default: "300"
+  images:
+    description: "Space-separated list of Docker images to load into kind (optional)"
+    required: false
+    default: ""
+
+outputs:
+  kubeconfig:
+    description: "Path to the kubeconfig file created by kind"
+    value: ${{ steps.set-kcfg.outputs.kcfg }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout test-infra
+      uses: actions/checkout@v4
+      with:
+        repository: datum-cloud/test-infra
+        path: test-infra
+
+    - name: Bootstrap cluster
+      shell: bash
+      working-directory: test-infra
+      run: |
+        make cluster-up \
+          CLUSTER_NAME="${{ inputs.cluster_name }}" \
+          WAIT_TIMEOUT="${{ inputs.wait_timeout }}"
+
+    - name: Load images into kind
+      if: ${{ inputs.images != '' }}
+      shell: bash
+      working-directory: test-infra
+      run: |
+        make kind-load-image \
+          CLUSTER_NAME="${{ inputs.cluster_name }}" \
+          IMAGES="${{ inputs.images }}"
+
+    # ----- expose kubeconfig -----
+    - id: set-kcfg
+      name: Export kubeconfig
+      shell: bash
+      run: |
+        echo "kcfg=$HOME/.kube/config" >> "$GITHUB_OUTPUT"   # for outputs
+        echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV" # for later steps
