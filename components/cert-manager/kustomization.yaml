@@ -1,0 +1,5 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Pinned to v1.15.0 for reproducibility
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
