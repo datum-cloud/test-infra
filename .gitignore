@@ -1,0 +1,88 @@
+# Compiled binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage profiles
+*.out
+*.coverprofile
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+vendor/
+
+# Build artifacts
+dist/
+build/
+target/
+
+# Local development files
+.env
+.env.local
+.env.*.local
+
+# Kind cluster configs (generated)
+kind-config.yaml
+
+# Docker build cache
+.docker/
+
+# Kubernetes config files (sensitive)
+kubeconfig
+*.kubeconfig
+
+# Terraform state files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Helm charts (if any)
+charts/*/charts/
+charts/*/Chart.lock
+
+# Local testing artifacts
+test-results/
+*.xml
+*.html
+
+# Security scan results
+trivy-results.*
+vulnerability-scan.*
+
+# Backup files
+*.bak
+*.backup
+
+# Local scripts (not to be committed)
+local-*
+dev-*

@@ -1,0 +1,127 @@
+name: 'Setup Kind Cluster'
+description: 'Setup Kind Kubernetes cluster with Flux and cert-manager pre-installed'
+
+inputs:
+  cluster-name:
+    description: 'Name of the Kind cluster'
+    required: false
+    default: 'test-cluster'
+  kubernetes-version:
+    description: 'Kubernetes version to use'
+    required: false
+    default: 'v1.28.0'
+  kind-image:
+    description: 'Custom Kind image to use'
+    required: false
+    default: 'ghcr.io/datum-cloud/test-infra/kind-with-flux:latest'
+  node-count:
+    description: 'Number of worker nodes'
+    required: false
+    default: '1'
+  wait-timeout:
+    description: 'Timeout for cluster readiness'
+    required: false
+    default: '10m'
+  extra-port-mappings:
+    description: 'JSON array of port mappings'
+    required: false
+    default: '[]'
+
+
+outputs:
+  cluster-name:
+    description: 'Name of the created cluster'
+    value: ${{ inputs.cluster-name }}
+  kubeconfig:
+    description: 'Path to kubeconfig file'
+    value: ${{ steps.create-cluster.outputs.kubeconfig }}
+  cluster-ready:
+    description: 'Whether cluster is ready'
+    value: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create Kind config
+      shell: bash
+      run: |
+        echo "Creating Kind configuration..."
+
+        # Parse node count
+        WORKER_COUNT=${{ inputs.node-count }}
+
+        # Parse extra port mappings
+        EXTRA_PORTS='${{ inputs.extra-port-mappings }}'
+
+        # Create Kind config
+        cat > /tmp/kind-config.yaml <<EOF
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        name: ${{ inputs.cluster-name }}
+        nodes:
+        - role: control-plane
+        EOF
+
+
+
+        # Add extra port mappings if provided
+        if [ "$EXTRA_PORTS" != "[]" ]; then
+          echo "$EXTRA_PORTS" | jq -r '.[] | "  - containerPort: \(.containerPort)\n    hostPort: \(.hostPort)\n    protocol: \(.protocol // "TCP")"' >> /tmp/kind-config.yaml
+        fi
+
+        # Add worker nodes
+        for i in $(seq 1 $WORKER_COUNT); do
+          cat >> /tmp/kind-config.yaml <<EOF
+        - role: worker
+        EOF
+        done
+
+        echo "Kind configuration:"
+        cat /tmp/kind-config.yaml
+
+    - name: Create Kind cluster
+      id: create-cluster
+      shell: bash
+      run: |
+        echo "Creating Kind cluster with custom image..."
+
+        # Create cluster with custom image
+        kind create cluster \
+          --config /tmp/kind-config.yaml \
+          --image ${{ inputs.kind-image }} \
+          --wait ${{ inputs.wait-timeout }}
+
+        # Set kubeconfig path
+        KUBECONFIG_PATH="$HOME/.kube/config"
+        echo "kubeconfig=$KUBECONFIG_PATH" >> $GITHUB_OUTPUT
+
+        echo "✅ Kind cluster '${{ inputs.cluster-name }}' created successfully"
+
+
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        echo "🔍 Verifying cluster installation..."
+
+        # Check nodes
+        echo "Nodes:"
+        kubectl get nodes
+
+        # Check system pods
+        echo -e "\nSystem pods:"
+        kubectl get pods -n kube-system
+
+        # Check Flux
+        echo -e "\nFlux system:"
+        kubectl get pods -n flux-system
+
+        # Check cert-manager
+        echo -e "\ncert-manager:"
+        kubectl get pods -n cert-manager
+
+        # Check ClusterIssuers
+        echo -e "\nClusterIssuers:"
+        kubectl get clusterissuers
+
+        echo "✅ Cluster verification completed"

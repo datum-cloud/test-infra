@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+  annotations:
+    config.kubernetes.io/local-config: "true"
+    flux.weave.works/ignore: "false"
+
+resources:
+  - helmrepository.yaml
+  - helmrelease.yaml
+  - clusterissuers.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/component: certificate-management
+      app.kubernetes.io/managed-by: flux

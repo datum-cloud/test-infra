@@ -1,0 +1,32 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: test-ca-issuer
+spec:
+  ca:
+    secretName: test-ca-secret
+---
+# Create a self-signed certificate for the test CA
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-ca-certificate
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: test-ca
+  secretName: test-ca-secret
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
