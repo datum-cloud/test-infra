@@ -5,22 +5,30 @@
 set -euo pipefail
 
 TOOLS=("$@")
+
+KIND_VERSION="${KIND_VERSION:-v0.29.0}"
+
+# Detect OS/arch once, normalise
 OS=$(uname | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
-
-# map arm64 → aarch64 for some downloads
-[[ "$ARCH" == "arm64" ]] && ARCH="aarch64"
+[[ "$ARCH" == "x86_64" ]] && ARCH=amd64
+[[ "$ARCH" == "aarch64" ]] && ARCH=arm64
 
 install_kind() {
-  if ! command -v kind &>/dev/null; then
-    echo "Installing kind..."
+  wanted="$KIND_VERSION"
+
+  if ! command -v kind >/dev/null 2>&1 || ! kind --version | grep -q "$wanted"; then
+    echo "Installing kind $wanted …"
+
     case "$OS" in
       darwin|linux)
-        curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.23.0/kind-${OS}-${ARCH}" && \
-          chmod +x ./kind && sudo mv ./kind /usr/local/bin/
+        url="https://github.com/kubernetes-sigs/kind/releases/download/${wanted}/kind-${OS}-${ARCH}"
+        curl -fsSL -o kind "$url"
+        chmod +x kind
+        sudo mv kind /usr/local/bin/kind
         ;;
       msys*|mingw*|cygwin*)
-        choco install kind   -y || winget install Kind
+        choco install kind -y || winget install Kind
         ;;
     esac
   fi

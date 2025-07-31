@@ -43,9 +43,11 @@ runs:
       shell: bash
       working-directory: test-infra
       run: |
+        # turn any new-lines into single spaces so the next command line is valid
+        IMG_LIST=$(printf '%s' "${{ inputs.images }}" | tr '\n' ' ')
         make kind-load-image \
           CLUSTER_NAME="${{ inputs.cluster_name }}" \
-          IMAGES="${{ inputs.images }}"
+          IMAGES="$IMG_LIST"
 
     # ----- expose kubeconfig -----
     - id: set-kcfg

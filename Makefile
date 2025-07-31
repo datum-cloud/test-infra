@@ -6,6 +6,13 @@ K8S_VERSION  ?= v1.30.0         # change to taste
 KIND_CFG     := cluster/kind-config.yaml
 TOOLS        := kind kubectl kustomize flux
 
+# --- NEW: explicit tool versions ------------------------------------------------
+KIND_VERSION      ?= v0.29.0
+
+# make the pins visible to any child script (set -u safe)
+export KIND_VERSION 
+# -----------------------------------------------------------------------------
+
 SHELL := /usr/bin/env bash
 
 # --------------------------
@@ -47,7 +54,7 @@ delete-kind: ## delete KIND cluster
 
 .PHONY: install-components
 install-components: install-cert-manager install-flux install-kyverno wait-ready ## all add-ons
-	@echo "➡️  Installing cluster components ..."
+	@echo "➡️  Installed cluster components ..."
 
 .PHONY: install-cert-manager
 install-cert-manager: ## deploy cert-manager via Kustomize
