@@ -53,27 +53,36 @@ delete-kind: ## delete KIND cluster
 	@kind delete cluster --name $(CLUSTER_NAME) || true
 
 .PHONY: install-components
-install-components: install-cert-manager install-flux install-kyverno wait-ready ## all add-ons
+install-components: install-flux install-cert-manager install-kyverno ## all add-ons
 	@echo "➡️  Installed cluster components ..."
 
 .PHONY: install-cert-manager
-install-cert-manager: ## deploy cert-manager via Kustomize
-	@echo "➡️  Reconciling cert-manager ..."
+install-cert-manager:   ## deploy cert-manager (+ CSI driver) via Kustomize, then wait
+	@echo "➡️  Reconciling cert-manager …"
 	kustomize build components/cert-manager | kubectl apply -f -
+	@echo "⏳ Waiting for cert-manager HelmReleases …"
+	@kubectl -n cert-manager wait helmrelease/{cert-manager,cert-manager-csi-driver} \
+	    --for=condition=Ready --timeout=$(WAIT_TIMEOUT)
+	@echo "✅ cert-manager and CSI driver are ready"
 
 .PHONY: install-flux
-install-flux: ## deploy Flux via Kustomize
-	@echo "➡️  Reconciling Flux ..."
+install-flux:        ## deploy Flux via Kustomize, then wait for its controllers
+	@echo "➡️  Reconciling Flux …"
 	kustomize build components/flux | kubectl apply -f -
+	@echo "⏳ Waiting for Flux controllers …"
+	@kubectl -n flux-system wait deployment/{source-controller,helm-controller,kustomize-controller,notification-controller} \
+	    --for=condition=Available --timeout=$(WAIT_TIMEOUT)
+	@echo "✅ Flux is ready"
 
 .PHONY: install-kyverno
-install-kyverno:  ## Deploy or upgrade Kyverno idempotently
-	@echo "➡️  Reconciling Kyverno ..."
-	@kustomize build components/kyverno | kubectl apply --server-side --field-manager=kyverno-installer --force-conflicts -f -
-
-.PHONY: wait-ready
-wait-ready:              ## Wait for all deployments, show progress
-	@./hack/wait-ready.sh $(WAIT_TIMEOUT)
+install-kyverno:     ## deploy or upgrade Kyverno idempotently, then wait
+	@echo "➡️  Reconciling Kyverno …"
+	@kustomize build components/kyverno | \
+	  kubectl apply --server-side --field-manager=kyverno-installer --force-conflicts -f -
+	@echo "⏳ Waiting for Kyverno controllers …"
+	@kubectl -n kyverno wait deployment/kyverno-{admission-controller,background-controller,cleanup-controller,reports-controller} \
+	    --for=condition=Available --timeout=$(WAIT_TIMEOUT)
+	@echo "✅ Kyverno is ready"
 
 # ------------------------------------------------------------------
 # Helpers for CI
