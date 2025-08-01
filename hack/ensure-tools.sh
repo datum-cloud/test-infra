@@ -14,24 +14,33 @@ ARCH=$(uname -m)
 [[ "$ARCH" == "x86_64" ]] && ARCH=amd64
 [[ "$ARCH" == "aarch64" ]] && ARCH=arm64
 
+
 install_kind() {
-  wanted="$KIND_VERSION"
+  wanted="${KIND_VERSION#v}"                 # drop leading “v” if present
 
-  if ! command -v kind >/dev/null 2>&1 || ! kind --version | grep -q "$wanted"; then
-    echo "Installing kind $wanted …"
-
-    case "$OS" in
-      darwin|linux)
-        url="https://github.com/kubernetes-sigs/kind/releases/download/${wanted}/kind-${OS}-${ARCH}"
-        curl -fsSL -o kind "$url"
-        chmod +x kind
-        sudo mv kind /usr/local/bin/kind
-        ;;
-      msys*|mingw*|cygwin*)
-        choco install kind -y || winget install Kind
-        ;;
-    esac
+  current=""
+  if command -v kind >/dev/null 2>&1; then
+    # kind --version prints:  kind version 0.29.0
+    current="$(kind --version 2>/dev/null | awk '{print $3}')"
   fi
+
+  if [ "$current" = "$wanted" ]; then
+    echo "✅ kind $current already installed"
+    return 0
+  fi
+
+  echo "Installing kind v$wanted …"
+  case "$OS" in
+    darwin|linux)
+      url="https://github.com/kubernetes-sigs/kind/releases/download/v${wanted}/kind-${OS}-${ARCH}"
+      curl -fsSL -o kind "$url"
+      chmod +x kind
+      sudo mv kind /usr/local/bin/kind
+      ;;
+    msys*|mingw*|cygwin*)
+      choco install kind -y || winget install Kind
+      ;;
+  esac
 }
 
 install_kubectl() {
