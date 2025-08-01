@@ -1,0 +1,59 @@
+name: bootstrap-kind-test
+on:
+  pull_request:
+    branches: [ main ]        
+    types: [opened, synchronize, reopened]
+
+  push:
+    branches:
+      - main
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Bootstrap KIND cluster
+        id: bootstrap
+        uses: ./.github/actions/kind-bootstrap
+        with:
+          cluster_name: test-infra
+          wait_timeout: 240s
+          images: |
+            nginx:1.27-alpine
+            busybox:latest
+
+      - name: Verify images pre-loaded on every node
+        run: |
+          set -euo pipefail
+          CLUSTER=test-infra
+      
+          # Exactly what you asked KIND to load
+          IMAGES=(
+            "docker.io/library/nginx:1.27-alpine"
+            "docker.io/library/busybox:latest"
+          )
+      
+          for node in $(kind get nodes --name "$CLUSTER"); do
+            # Build a simple newline-separated list: repo:tag
+            image_list=$(docker exec "$node" crictl images \
+                            | awk 'NR>1 {print $1 ":" $2}')   # skip header
+      
+            for img in "${IMAGES[@]}"; do
+              if grep -qx "$img" <<<"$image_list"; then
+                echo "✅ $img present on $node"
+              else
+                echo "❌ $img missing on $node"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Smoke-check cluster
+        run: kubectl get pods -A
