@@ -2,7 +2,7 @@
 # globals
 #------------------------------------------------------------------------------
 CLUSTER_NAME ?= test-infra
-K8S_VERSION  ?= v1.30.0         # change to taste
+K8S_VERSION  ?= v1.32.0         # change to taste
 KIND_CFG     := cluster/kind-config.yaml
 TOOLS        := kind kubectl kustomize flux
 
@@ -10,7 +10,7 @@ TOOLS        := kind kubectl kustomize flux
 KIND_VERSION      ?= v0.29.0
 
 # make the pins visible to any child script (set -u safe)
-export KIND_VERSION 
+export KIND_VERSION
 # -----------------------------------------------------------------------------
 
 SHELL := /usr/bin/env bash
