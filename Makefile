@@ -53,7 +53,7 @@ delete-kind: ## delete KIND cluster
 	@kind delete cluster --name $(CLUSTER_NAME) || true
 
 .PHONY: install-components
-install-components: install-flux install-cert-manager install-kyverno ## all add-ons
+install-components: install-flux install-cert-manager install-kyverno install-envoy-gateway-operator ## all add-ons
 	@echo "➡️  Installed cluster components ..."
 
 .PHONY: install-cert-manager
@@ -83,6 +83,15 @@ install-kyverno:     ## deploy or upgrade Kyverno idempotently, then wait
 	@kubectl -n kyverno wait deployment/kyverno-{admission-controller,background-controller,cleanup-controller,reports-controller} \
 	    --for=condition=Available --timeout=$(WAIT_TIMEOUT)
 	@echo "✅ Kyverno is ready"
+
+.PHONY: install-envoy-gateway-operator
+install-envoy-gateway-operator:     ## deploy Envoy Gateway Operator via Kustomize, then wait
+	@echo "➡️  Reconciling Envoy Gateway Operator …"
+	kustomize build components/envoy-gateway-operator | kubectl apply -f -
+	@echo "⏳ Waiting for Envoy Gateway Operator HelmRelease …"
+	@kubectl -n flux-system wait helmrelease/envoy-gateway \
+	    --for=condition=Ready --timeout=$(WAIT_TIMEOUT)
+	@echo "✅ Envoy Gateway Operator is ready"
 
 # ------------------------------------------------------------------
 # Helpers for CI

@@ -1,0 +1,29 @@
+---
+# Self-signed ClusterIssuer for test environments
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-cluster-issuer
+spec:
+  selfSigned: {}
+---
+# Certificate for Envoy Gateway default TLS
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: default-tls-certificate
+  namespace: envoy-gateway-system
+spec:
+  secretName: default-tls-secret
+  issuerRef:
+    name: selfsigned-cluster-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.localhost"
+    - "localhost"
+    - "*.local"
+    - "test-infra.local"
+    - "api.test-infra.local"
+    - "web.test-infra.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h # 30 days
