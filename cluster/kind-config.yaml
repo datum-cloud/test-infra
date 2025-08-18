@@ -5,6 +5,10 @@ nodes:
   - role: control-plane
     image: kindest/node:${K8S_VERSION:-v1.32.0}
     extraPortMappings:
+      # Grafana (Observability)
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
       # Envoy Gateway HTTPS
       - containerPort: 30443
         hostPort: 30443

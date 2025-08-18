@@ -1,0 +1,112 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: vm
+  namespace: flux-system
+spec:
+  interval: 15m
+  timeout: 10m
+  targetNamespace: telemetry-system
+  chart:
+    spec:
+      chart: victoria-metrics-k8s-stack
+      version: "0.58.3"
+      sourceRef:
+        kind: HelmRepository
+        name: vm
+        namespace: flux-system
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Enable Grafana Operator integration
+    defaultDashboards:
+      grafanaOperator:
+        enabled: true
+        spec:
+          instanceSelector:
+            matchLabels:
+              dashboards: "grafana"
+          allowCrossNamespaceImport: false
+
+    # Victoria Metrics Single configuration
+    vmsingle:
+      enabled: true
+      spec:
+        retentionPeriod: "1d"
+        storage:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+
+    # Victoria Metrics Agent configuration
+    vmagent:
+      enabled: true
+      spec:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+
+    # Built-in Grafana configuration - disabled in favor of operator-managed instance
+    grafana:
+      enabled: false
+
+    # VM Alert configuration - disable for test environment
+    vmalert:
+      enabled: false
+
+    # Alertmanager - disabled for test environment
+    alertmanager:
+      enabled: false
+
+    # Node exporter - configured for single-node KIND environment
+    nodeExporter:
+      enabled: true
+      # Disable hostPort to avoid port conflicts in KIND
+      service:
+        type: ClusterIP
+      hostNetwork: false
+      # Custom values to avoid hostPort usage
+      extraArgs:
+        - "--path.procfs=/host/proc"
+        - "--path.sysfs=/host/sys"
+        - "--path.rootfs=/host/root"
+        - "--web.listen-address=0.0.0.0:9100"
+
+    # Kube state metrics
+    kubeStateMetrics:
+      enabled: true
+
+    # Victoria Metrics Operator
+    victoria-metrics-operator:
+      cleanupCRD:
+        enabled: false
+
+    # Default scrape configs - disable problematic ones that create long names
+    defaultRules:
+      create: true
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+    kubeProxy:
+      enabled: false
+    kubeEtcd:
+      enabled: false
