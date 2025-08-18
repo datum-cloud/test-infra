@@ -3,15 +3,72 @@ version: '3'
 vars:
   CLUSTER_NAME: '{{.CLUSTER_NAME | default "test-infra"}}'
   K8S_VERSION: '{{.K8S_VERSION | default "v1.32.0"}}'
-  KIND_CFG: cluster/kind-config.yaml
-  TOOLS: kind kubectl kustomize flux
   KIND_VERSION: '{{.KIND_VERSION | default "v0.29.0"}}'
   WAIT_TIMEOUT: '{{.WAIT_TIMEOUT | default "300s"}}'
+  TOOLS: kind kubectl kustomize flux
+  # Detect if we're running in the test-infra repo or externally
+  REPO_DIR:
+    sh: |
+      if [ -f "cluster/kind-config.yaml" ] && [ -f "components/flux/kustomization.yaml" ]; then
+        echo "."
+      else
+        echo ".test-infra"
+      fi
+  # Repository URL for cloning when used externally
+  REPO_URL: '{{.REPO_URL | default "https://github.com/datum-cloud/test-infra.git"}}'
+  REPO_REF: '{{.REPO_REF | default "main"}}'
+  # All file paths relative to REPO_DIR
+  KIND_CFG: '{{.REPO_DIR}}/cluster/kind-config.yaml'
 
 env:
   KIND_VERSION: '{{.KIND_VERSION}}'
 
 tasks:
+  ensure-repo:
+    desc: "Ensure test-infra repository is available (clone if needed)"
+    silent: true
+    cmds:
+      - |
+        if [ "{{.REPO_DIR}}" != "." ]; then
+          if [ ! -d "{{.REPO_DIR}}" ]; then
+            echo "📦 Cloning test-infra repository to {{.REPO_DIR}}..."
+            git clone {{.REPO_URL}} {{.REPO_DIR}}
+            cd {{.REPO_DIR}}
+            git checkout {{.REPO_REF}}
+            echo "✅ Repository cloned successfully (ref: {{.REPO_REF}})"
+          else
+            echo "✅ Repository already exists at {{.REPO_DIR}}"
+            cd {{.REPO_DIR}}
+            # Fetch all refs to ensure we have tags and branches
+            git fetch origin --tags --force
+            git fetch origin
+
+            # Check if REPO_REF is a tag, branch, or commit
+            if git rev-parse --verify "{{.REPO_REF}}" >/dev/null 2>&1; then
+              current_ref=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || git rev-parse HEAD)
+              if [ "$current_ref" != "{{.REPO_REF}}" ]; then
+                echo "🔄 Switching from $current_ref to {{.REPO_REF}}..."
+                git checkout {{.REPO_REF}}
+              fi
+            else
+              echo "⚠️  Reference '{{.REPO_REF}}' not found, trying as remote branch..."
+              git checkout -B {{.REPO_REF}} origin/{{.REPO_REF}} || {
+                echo "❌ Failed to checkout '{{.REPO_REF}}'"
+                exit 1
+              }
+            fi
+
+            # Only pull if it's a branch (not a tag or detached HEAD)
+            if git symbolic-ref -q HEAD >/dev/null; then
+              git pull origin {{.REPO_REF}} 2>/dev/null || true
+            fi
+
+            echo "✅ Repository updated (ref: {{.REPO_REF}})"
+          fi
+        else
+          echo "✅ Running in source repository"
+        fi
+
   help:
     desc: "Show organized help with command groups"
     silent: true
@@ -63,6 +120,7 @@ tasks:
         # Set up error handling
         set -e
         trap 'echo "❌ Cluster deployment failed! Use '\''task cluster-status'\'' to check cluster state."' ERR
+      - task: ensure-repo
       - task: ensure-tools
       - task: create-kind
       - task: install-components
@@ -149,7 +207,7 @@ tasks:
     desc: "Install/verify deps"
     silent: true
     cmds:
-      - bash hack/ensure-tools.sh {{.TOOLS}}
+      - bash {{.REPO_DIR}}/hack/ensure-tools.sh {{.TOOLS}}
 
   create-kind:
     desc: "Create KIND cluster"
@@ -236,7 +294,7 @@ tasks:
     silent: true
     cmds:
       - echo "➡️  Reconciling cert-manager …"
-      - kustomize build components/cert-manager | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/cert-manager | kubectl apply -f -
       - echo "⏳ Waiting for cert-manager HelmReleases …"
       - kubectl -n cert-manager wait helmrelease/{cert-manager,cert-manager-csi-driver} --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "✅ cert-manager and CSI driver are ready"
@@ -246,7 +304,7 @@ tasks:
     silent: true
     cmds:
       - echo "➡️  Reconciling Flux …"
-      - kustomize build components/flux | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/flux | kubectl apply -f -
       - echo "⏳ Waiting for Flux controllers …"
       - kubectl -n flux-system wait deployment/{source-controller,helm-controller,kustomize-controller,notification-controller} --for=condition=Available --timeout={{.WAIT_TIMEOUT}}
       - echo "⏳ Waiting for Flux CRDs to be ready …"
@@ -258,7 +316,7 @@ tasks:
     silent: true
     cmds:
       - echo "➡️  Reconciling Kyverno …"
-      - kustomize build components/kyverno | kubectl apply --server-side --field-manager=kyverno-installer --force-conflicts -f -
+      - kustomize build {{.REPO_DIR}}/components/kyverno | kubectl apply --server-side --field-manager=kyverno-installer --force-conflicts -f -
       - echo "⏳ Waiting for Kyverno controllers …"
       - kubectl -n kyverno wait deployment/kyverno-{admission-controller,background-controller,cleanup-controller,reports-controller} --for=condition=Available --timeout={{.WAIT_TIMEOUT}}
       - echo "✅ Kyverno is ready"
@@ -268,11 +326,11 @@ tasks:
     silent: true
     cmds:
       - echo "➡️  Reconciling Envoy Gateway Operator …"
-      - kustomize build components/envoy-gateway-operator | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator | kubectl apply -f -
       - echo "⏳ Waiting for Envoy Gateway Operator HelmRelease …"
       - kubectl -n flux-system wait helmrelease/envoy-gateway --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "➡️  Applying Gateway Configuration (merged gateway setup) …"
-      - kustomize build components/envoy-gateway-operator/gateway-resources | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator/gateway-resources | kubectl apply -f -
       - echo "⏳ Waiting for Gateway to be ready …"
       - kubectl wait --for=condition=Programmed gateway/default-gateway -n envoy-gateway-system --timeout={{.WAIT_TIMEOUT}} || true
       - echo "✅ Envoy Gateway Operator and merged gateway are ready"
@@ -286,8 +344,9 @@ tasks:
     desc: "[OPTIONAL] Deploy complete observability stack (Victoria Metrics, Loki, Tempo, Grafana)"
     silent: true
     cmds:
+      - task: ensure-repo
       - echo "➡️  Reconciling Observability Stack …"
-      - kustomize build components/observability | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/observability | kubectl apply -f -
       - echo "⏳ Waiting for Grafana Operator HelmRelease …"
       - kubectl -n flux-system wait helmrelease/grafana-operator --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "⏳ Waiting for Victoria Metrics Stack HelmRelease …"
@@ -299,9 +358,9 @@ tasks:
       - echo "⏳ Waiting for Promtail HelmRelease …"
       - kubectl -n flux-system wait helmrelease/promtail --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "➡️  Applying Grafana Instance (after Operator CRDs are ready) …"
-      - kubectl apply -f components/observability/grafana-instance.yaml
+      - kubectl apply -f {{.REPO_DIR}}/components/observability/grafana-instance.yaml
       - echo "➡️  Applying Grafana Datasources …"
-      - kustomize build components/observability/datasources | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/observability/datasources | kubectl apply -f -
       - echo "✅ Observability stack is ready"
       - echo ""
       - 'echo "📊 Access Grafana at: http://localhost:30000"'

@@ -1,12 +1,12 @@
 # Test Infrastructure
 
-A comprehensive test‑infrastructure repository designed to support software testing across an organization. This repository provides **standardised Kubernetes test environments** with pre‑configured shared infrastructure components, enabling consistent and efficient testing workflows for services that operate within Kubernetes clusters.
+A comprehensive test‑infrastructure repository designed to support software testing across an organization. This repository provides **standardized Kubernetes test environments** with pre‑configured shared infrastructure components, enabling consistent and efficient testing workflows for services that operate within Kubernetes clusters.
 
 ## Overview
 
 - 🚀 **Fast Test Environment Provisioning** – get a fully configured Kubernetes cluster in **2–3 minutes**.
-- 🔄 **Standardised Infrastructure** – cert‑manager, Flux CD and Kyverno installed and version‑pinned out‑of‑the‑box.
-- ⚡ **CI/CD Optimised** – purpose‑built for GitHub Actions with minimal resource overhead.
+- 🔄 **Standardized Infrastructure** – cert‑manager, Flux CD and Kyverno installed and version‑pinned out‑of‑the‑box.
+- ⚡ **CI/CD Optimized** – purpose‑built for GitHub Actions with minimal resource overhead.
 - 🎯 **Ephemeral by Design** – perfect for short‑lived test environments that can be created and destroyed on‑demand.
 - 📦 **GitOps Ready** – pre‑configured Flux installation supports declarative infrastructure management.
 - 🌐 **Gateway Ready** – Envoy Gateway with merged configuration provides HTTP/HTTPS ingress on non-privileged ports.
@@ -15,9 +15,7 @@ A comprehensive test‑infrastructure repository designed to support software te
 
 The cluster exposes several ports for easy access without requiring port-forwarding:
 
-- **8080**: HTTP Gateway (Envoy Gateway)
-- **8443**: HTTPS Gateway (Envoy Gateway)
-- **8081, 8082**: Additional development ports
+- **30443**: HTTPS Gateway (Envoy Gateway)
 - **30000**: Grafana dashboard (after installing observability)
 
 All ports use non-privileged ranges (>1024) to avoid requiring administrative privileges.
@@ -29,7 +27,6 @@ All ports use non-privileged ranges (>1024) to avoid requiring administrative pr
 | Requirement | Version | Why |
 |-------------|---------|-----|
 | Docker      | ≥ 20.10 | KIND creates Docker containers that act as Kubernetes nodes |
-| GNU Make    | ≥ 4.3   | Simple cross‑platform task runner |
 | Bash (or PowerShell) | n/a | Scripts & Taskfile helpers |
 
 > **Windows note** – use a *Git Bash* or *WSL2* environment for best results. PowerShell functions are also included where possible.
@@ -37,6 +34,8 @@ All ports use non-privileged ranges (>1024) to avoid requiring administrative pr
 ---
 
 ## Quick‑start
+
+### Local Usage
 
 ```bash
 # Clone the repo and spin up everything (tools + cluster + add‑ons)
@@ -46,6 +45,10 @@ $ task cluster-up
 # Tear everything down when finished
 $ task cluster-down
 ```
+
+### Remote Usage (Include in Your Project)
+
+You can include this test infrastructure in any project without cloning. See the [Using from Other Repositories](#using-from-other-repositories) section for complete setup instructions.
 
 ## Parallels on Windows
 If you prefer PowerShell:
@@ -58,7 +61,7 @@ PS> task install-components # deploy cert‑manager, Flux & Kyverno via kustomiz
 
 ## How it Works
 
-- `task ensure-tools` – installs or upgrades **kind**, **kubectl**, **kustomize**, and **flux** binaries into `./bin` (then adds that directory to `PATH`).
+- `task ensure-tools` – installs or upgrades **kind**, **kubectl**, **kustomize**, and **flux** binaries using system package managers or direct downloads.
 - `task create-kind` – boots a single-node **kind** cluster using `cluster/kind-config.yaml`.
 - `task install-components` – applies `cluster/kustomization.yaml`; that file, in turn, references **all** `components/*` Kustomizations. Each component is pinned to a specific, well-tested upstream release.
 - **GitOps (optional)** – once Flux is running you can point it at your service repositories to sync manifests or Helm charts exactly as in production.
@@ -129,10 +132,64 @@ task install-observability        # Add telemetry stack
 
 The observability stack is designed for development and testing environments with appropriate resource limits and simplified configurations.
 
+## Using from Other Repositories
+
+This test infrastructure can be included and reused across multiple projects without requiring a full clone. The taskfile automatically handles repository management when used externally.
+
+### Basic Setup
+
+1. **Add to your project's `Taskfile.yml`:**
+   ```yaml
+   version: '3'
+
+   includes:
+     test-infra:
+       taskfile: https://raw.githubusercontent.com/datum-cloud/test-infra/main/Taskfile.yml
+   ```
+
+2. **Enable experimental remote taskfiles:**
+   ```bash
+   # One-time setup
+   export TASK_X_REMOTE_TASKFILES=1
+
+   # Or add to .env file in your project
+   echo "TASK_X_REMOTE_TASKFILES=1" >> .env
+   ```
+
+### Advanced Configuration
+
+Override default settings by passing variables:
+
+```yaml
+# Your project's Taskfile.yml
+version: '3'
+
+includes:
+  test-infra:
+    taskfile: https://raw.githubusercontent.com/datum-cloud/test-infra/main/Taskfile.yml
+    vars:
+      CLUSTER_NAME: my-project-test     # Custom cluster name
+      K8S_VERSION: v1.32.0              # Specific Kubernetes version
+      REPO_REF: feature-branch          # Use specific branch/tag
+      WAIT_TIMEOUT: 600s                # Longer timeout for slower environments
+```
+
+### Available Tasks
+
+All tasks are prefixed with your include name:
+
+```bash
+task test-infra:help                       # Show all available commands
+task test-infra:cluster-up                 # Deploy full infrastructure
+task test-infra:cluster-down               # Destroy cluster
+task test-infra:cluster-status             # Check cluster health
+task test-infra:install-observability      # Add telemetry stack
+```
+
 ## Troubleshooting
 
 Versions – run task ensure-tools regularly; it will upgrade outdated binaries.
 
 Docker conflicts – if port collisions occur, delete the cluster and recreate with a different name: task cluster-up CLUSTER_NAME=my‑test.
 
-Permissions – on Linux you may need to sudo chown -R $USER:$GROUP bin after the first tool install.
+Permissions – tools are installed to system directories and may require sudo privileges.
