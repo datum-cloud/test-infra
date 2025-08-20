@@ -1,0 +1,110 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tempo
+  namespace: flux-system
+spec:
+  interval: 15m
+  timeout: 10m
+  targetNamespace: telemetry-system
+  chart:
+    spec:
+      chart: tempo
+      version: "1.10.3"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Single binary deployment for test environment
+    tempo:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+      # Storage configuration
+      storage:
+        trace:
+          backend: local
+          local:
+            path: /var/tempo/traces
+          wal:
+            path: /var/tempo/wal
+
+      # Retention configuration
+      compactor:
+        compaction:
+          block_retention: 168h  # 7 days
+
+    # Persistence configuration
+    persistence:
+      enabled: true
+      storageClassName: ""
+      size: 5Gi
+      accessModes:
+        - ReadWriteOnce
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 3100
+
+    # Configuration
+    config: |
+      multitenancy_enabled: false
+      usage_report:
+        reporting_enabled: false
+      compactor:
+        compaction:
+          block_retention: 168h
+      distributor:
+        receivers:
+          jaeger:
+            protocols:
+              thrift_http:
+                endpoint: 0.0.0.0:14268
+              grpc:
+                endpoint: 0.0.0.0:14250
+          zipkin:
+            endpoint: 0.0.0.0:9411
+          otlp:
+            protocols:
+              http:
+                endpoint: 0.0.0.0:4318
+              grpc:
+                endpoint: 0.0.0.0:4317
+      ingester:
+        max_block_duration: 5m
+      server:
+        http_listen_port: 3100
+        log_level: info
+      storage:
+        trace:
+          backend: local
+          wal:
+            path: /var/tempo/wal
+          local:
+            path: /var/tempo/blocks
+
+    # ServiceMonitor for metrics (disabled for test environment)
+    serviceMonitor:
+      enabled: false
+
+    # Test environment optimizations
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 10001
+      fsGroup: 10001

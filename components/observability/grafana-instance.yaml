@@ -1,0 +1,40 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: Grafana
+metadata:
+  name: grafana
+  namespace: telemetry-system
+  labels:
+    dashboards: "grafana"
+spec:
+  config:
+    auth:
+      disable_login_form: "false"
+    auth.anonymous:
+      enabled: "false"
+    security:
+      admin_user: admin
+      admin_password: datum123
+  service:
+    spec:
+      type: NodePort
+      ports:
+        - name: grafana-http
+          port: 3000
+          targetPort: 3000
+          nodePort: 30000
+          protocol: TCP
+  deployment:
+    spec:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - name: grafana
+              image: grafana/grafana:10.4.3
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
