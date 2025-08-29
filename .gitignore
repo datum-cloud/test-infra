@@ -5,3 +5,5 @@
 *.tmp
 # KIND docker images & kubeconfig if copied here accidentally
 *.tgz
+# Well known location for the kubeconfig to use talk to the test-infra cluster.
+kubeconfig

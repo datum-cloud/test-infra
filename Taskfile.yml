@@ -6,6 +6,8 @@ vars:
   KIND_VERSION: '{{.KIND_VERSION | default "v0.29.0"}}'
   WAIT_TIMEOUT: '{{.WAIT_TIMEOUT | default "300s"}}'
   TOOLS: kind kubectl kustomize flux
+  # Local kubeconfig file in repo root (for test-infra KIND cluster)
+  KUBECONFIG_FILE: '{{.KUBECONFIG_FILE | default "./kubeconfig"}}'
   # Detect if we're running in the test-infra repo or externally
   REPO_DIR:
     sh: |
@@ -22,6 +24,7 @@ vars:
 
 env:
   KIND_VERSION: '{{.KIND_VERSION}}'
+  KUBECONFIG: '{{.KUBECONFIG_FILE}}'
 
 tasks:
   ensure-repo:
@@ -82,6 +85,8 @@ tasks:
       - echo ""
       - echo "🔍 Cluster Inspection:"
       - echo "  cluster-status          Show cluster status and health"
+      - echo "  kubectl                 Run kubectl commands (pass args with --)"
+      - echo "  k9s                     Launch k9s to browse test-infra cluster"
       - echo ""
       - echo "🔧 Setup & Infrastructure:"
       - echo "  ensure-tools            Install/verify deps"
@@ -135,6 +140,7 @@ tasks:
       - echo "   • task install-observability"  # Deploy full telemetry stack
       - echo ""
       - echo "🚀 Quick start:"
+      - echo "   • export KUBECONFIG={{.KUBECONFIG_FILE}}"  # Connect to test-infra cluster
       - echo "   • task cluster-status"                # Check cluster health
       - echo "   • kubectl get pods --all-namespaces"  # List all pods
       - echo "   • curl -k https://localhost:8443"     # Test gateway
@@ -158,6 +164,40 @@ tasks:
   #------------------------------------------------------------------------------
   # cluster status and validation
   #------------------------------------------------------------------------------
+  kubectl:
+    desc: "Run kubectl commands against the test-infra cluster"
+    silent: true
+    cmds:
+      - |
+        if [ ! -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "❌ Kubeconfig not found at {{.KUBECONFIG_FILE}}"
+          echo "💡 Run 'task cluster-up' first to create the cluster"
+          exit 1
+        fi
+
+        kubectl --kubeconfig {{.KUBECONFIG_FILE}} {{.CLI_ARGS}}
+
+  k9s:
+    desc: "Launch k9s to browse the test-infra cluster"
+    silent: true
+    cmds:
+      - |
+        if [ ! -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "❌ Kubeconfig not found at {{.KUBECONFIG_FILE}}"
+          echo "💡 Run 'task cluster-up' first to create the cluster"
+          exit 1
+        fi
+
+        if ! command -v k9s >/dev/null 2>&1; then
+          echo "❌ k9s is not installed"
+          echo "💡 Install k9s from: https://k9scli.io/topics/install/"
+          exit 1
+        fi
+
+        echo "🚀 Launching k9s for test-infra cluster..."
+        echo "📝 Using kubeconfig: {{.KUBECONFIG_FILE}}"
+        k9s --kubeconfig {{.KUBECONFIG_FILE}}
+
   cluster-status:
     desc: "Show cluster status and health"
     silent: true
@@ -233,9 +273,10 @@ tasks:
             exit 1
           fi
 
-          # Create cluster with error handling
-          if kind create cluster --name {{.CLUSTER_NAME}} --image kindest/node:{{.K8S_VERSION}} --config {{.KIND_CFG}}; then
+          # Create cluster with error handling and custom kubeconfig
+          if kind create cluster --name {{.CLUSTER_NAME}} --image kindest/node:{{.K8S_VERSION}} --config {{.KIND_CFG}} --kubeconfig {{.KUBECONFIG_FILE}}; then
             echo "✅ KIND cluster created successfully"
+            echo "📝 Test-infra cluster kubeconfig written to: {{.KUBECONFIG_FILE}}"
 
             # Wait for cluster to be ready
             echo "⏳ Waiting for cluster to be ready..."
@@ -277,6 +318,13 @@ tasks:
         # Clean up any lingering containers
         echo "🧹 Cleaning up any leftover containers..."
         docker ps -a --filter "label=io.x-k8s.kind.cluster={{.CLUSTER_NAME}}" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+
+        # Clean up kubeconfig file if it exists
+        if [ -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "🧹 Removing test-infra cluster kubeconfig file..."
+          rm -f {{.KUBECONFIG_FILE}}
+        fi
+
         echo "✅ Cleanup complete"
 
   install-components:

@@ -42,6 +42,10 @@ All ports use non-privileged ranges (>1024) to avoid requiring administrative pr
 $ git clone https://github.com/datum-cloud/test-infra.git && cd test-infra
 $ task cluster-up
 
+# Connect kubectl to the test-infra cluster
+$ export KUBECONFIG=./kubeconfig
+$ kubectl get nodes  # Verify connection
+
 # Tear everything down when finished
 $ task cluster-down
 ```
@@ -62,9 +66,11 @@ PS> task install-components # deploy cert‑manager, Flux & Kyverno via kustomiz
 ## How it Works
 
 - `task ensure-tools` – installs or upgrades **kind**, **kubectl**, **kustomize**, and **flux** binaries using system package managers or direct downloads.
-- `task create-kind` – boots a single-node **kind** cluster using `cluster/kind-config.yaml`.
+- `task create-kind` – boots a single-node **kind** cluster using `cluster/kind-config.yaml` and writes kubeconfig to `./kubeconfig`.
 - `task install-components` – applies `cluster/kustomization.yaml`; that file, in turn, references **all** `components/*` Kustomizations. Each component is pinned to a specific, well-tested upstream release.
 - **GitOps (optional)** – once Flux is running you can point it at your service repositories to sync manifests or Helm charts exactly as in production.
+
+> **Note:** The cluster kubeconfig is written to `./kubeconfig` in the repository root. This file is gitignored and should not be committed. Set `export KUBECONFIG=./kubeconfig` to interact with the cluster.
 
 
 ## Adding New Components
@@ -100,6 +106,10 @@ The modular layout keeps the bootstrap lean while letting teams layer in extra i
 `task ensure-tools` - Installs or upgrades the required tools (kind, kubectl, kustomize, flux)
 
 `task create-kind` - Creates a KIND cluster using the configuration in `cluster/kind-config.yaml`
+
+`task kubectl -- <args>` - Run kubectl commands against the test-infra cluster without setting KUBECONFIG (e.g., `task kubectl -- get pods`)
+
+`task k9s` - Launch k9s to interactively browse the test-infra cluster
 
 `task install-components` - Applies the `kustomization.yaml` in the `cluster/` directory, which installs cert-manager, Flux, and Kyverno
 
@@ -184,12 +194,24 @@ task test-infra:cluster-up                 # Deploy full infrastructure
 task test-infra:cluster-down               # Destroy cluster
 task test-infra:cluster-status             # Check cluster health
 task test-infra:install-observability      # Add telemetry stack
+
+# To connect kubectl to the test cluster:
+export KUBECONFIG=.test-infra/kubeconfig
 ```
+
+> **Note:** When using from another repository, the kubeconfig will be in `.test-infra/kubeconfig`.
 
 ## Troubleshooting
 
-Versions – run task ensure-tools regularly; it will upgrade outdated binaries.
+**Versions** – run `task ensure-tools` regularly; it will upgrade outdated binaries.
 
-Docker conflicts – if port collisions occur, delete the cluster and recreate with a different name: task cluster-up CLUSTER_NAME=my‑test.
+**Docker conflicts** – if port collisions occur, delete the cluster and recreate with a different name: `task cluster-up CLUSTER_NAME=my‑test`.
 
-Permissions – tools are installed to system directories and may require sudo privileges.
+**Permissions** – tools are installed to system directories and may require sudo privileges.
+
+**Kubectl connection** – ensure you've set the KUBECONFIG environment variable:
+```bash
+export KUBECONFIG=./kubeconfig  # From repo root
+# Or when using from another repo:
+export KUBECONFIG=.test-infra/kubeconfig
+```
