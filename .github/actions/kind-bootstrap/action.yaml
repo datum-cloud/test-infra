@@ -30,11 +30,17 @@ runs:
         repository: datum-cloud/test-infra
         path: test-infra
 
+    - name: Install Task
+      uses: arduino/setup-task@v2
+      with:
+        version: 3.x
+        repo-token: ${{ github.token }}
+
     - name: Bootstrap cluster
       shell: bash
       working-directory: test-infra
       run: |
-        make cluster-up \
+        task cluster-up \
           CLUSTER_NAME="${{ inputs.cluster_name }}" \
           WAIT_TIMEOUT="${{ inputs.wait_timeout }}"
 
@@ -45,7 +51,7 @@ runs:
       run: |
         # turn any new-lines into single spaces so the next command line is valid
         IMG_LIST=$(printf '%s' "${{ inputs.images }}" | tr '\n' ' ')
-        make kind-load-image \
+        task kind-load-image \
           CLUSTER_NAME="${{ inputs.cluster_name }}" \
           IMAGES="$IMG_LIST"
 
@@ -53,6 +59,8 @@ runs:
     - id: set-kcfg
       name: Export kubeconfig
       shell: bash
+      working-directory: test-infra
       run: |
-        echo "kcfg=$HOME/.kube/config" >> "$GITHUB_OUTPUT"   # for outputs
-        echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV" # for later steps
+        # The kubeconfig is now created at ./kubeconfig in the test-infra directory
+        echo "kcfg=$PWD/kubeconfig" >> "$GITHUB_OUTPUT"   # for outputs
+        echo "KUBECONFIG=$PWD/kubeconfig" >> "$GITHUB_ENV" # for later steps
