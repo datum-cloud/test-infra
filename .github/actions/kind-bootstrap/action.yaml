@@ -59,6 +59,8 @@ runs:
     - id: set-kcfg
       name: Export kubeconfig
       shell: bash
+      working-directory: test-infra
       run: |
-        echo "kcfg=$HOME/.kube/config" >> "$GITHUB_OUTPUT"   # for outputs
-        echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV" # for later steps
+        # The kubeconfig is now created at ./kubeconfig in the test-infra directory
+        echo "kcfg=$PWD/kubeconfig" >> "$GITHUB_OUTPUT"   # for outputs
+        echo "KUBECONFIG=$PWD/kubeconfig" >> "$GITHUB_ENV" # for later steps
