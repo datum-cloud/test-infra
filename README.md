@@ -29,7 +29,9 @@ All ports use non-privileged ranges (>1024) to avoid requiring administrative pr
 | Docker      | ≥ 20.10 | KIND creates Docker containers that act as Kubernetes nodes |
 | Bash (or PowerShell) | n/a | Scripts & Taskfile helpers |
 
-> **Windows note** – use a *Git Bash* or *WSL2* environment for best results. PowerShell functions are also included where possible.
+> [!NOTE]
+>
+> **Windows users** – use a *Git Bash* or *WSL2* environment for best results. PowerShell functions are also included where possible.
 
 ---
 
@@ -42,9 +44,9 @@ All ports use non-privileged ranges (>1024) to avoid requiring administrative pr
 $ git clone https://github.com/datum-cloud/test-infra.git && cd test-infra
 $ task cluster-up
 
-# Connect kubectl to the test-infra cluster
-$ export KUBECONFIG=./kubeconfig
-$ kubectl get nodes  # Verify connection
+# Use the kubectl wrapper to connect to the test-infra cluster
+$ task kubectl -- get nodes  # Automatically uses correct kubeconfig
+$ task k9s                    # Launch k9s terminal UI for cluster browsing
 
 # Tear everything down when finished
 $ task cluster-down
@@ -58,9 +60,9 @@ You can include this test infrastructure in any project without cloning. See the
 If you prefer PowerShell:
 
 ```powershell
-PS> task ensure-tools  # idempotent – only installs what is missing
-PS> task create-kind # create the KIND cluster only
-PS> task install-components # deploy cert‑manager, Flux & Kyverno via kustomize
+PS> task ensure-tools         # idempotent – only installs what is missing
+PS> task create-kind          # create the KIND cluster only
+PS> task install-components   # deploy cert‑manager, Flux & Kyverno via kustomize
 ```
 
 ## How it Works
@@ -70,7 +72,12 @@ PS> task install-components # deploy cert‑manager, Flux & Kyverno via kustomiz
 - `task install-components` – applies `cluster/kustomization.yaml`; that file, in turn, references **all** `components/*` Kustomizations. Each component is pinned to a specific, well-tested upstream release.
 - **GitOps (optional)** – once Flux is running you can point it at your service repositories to sync manifests or Helm charts exactly as in production.
 
-> **Note:** The cluster kubeconfig is written to `./kubeconfig` in the repository root. This file is gitignored and should not be committed. Set `export KUBECONFIG=./kubeconfig` to interact with the cluster.
+> [!NOTE]
+> The cluster kubeconfig location depends on context:
+> - When running in the test-infra repo: `./kubeconfig`
+> - When running from another repo: `.test-infra/kubeconfig`
+>
+> This file is gitignored and should not be committed. The Taskfile automatically uses the correct path.
 
 
 ## Adding New Components
@@ -130,7 +137,7 @@ The test infrastructure provides optional components that can be deployed after 
 Deploy a comprehensive telemetry system for monitoring, logging, and distributed tracing:
 
 ```bash
-task cluster-up                    # Deploy core infrastructure first
+task cluster-up                   # Deploy core infrastructure first
 task install-observability        # Add telemetry stack
 ```
 
@@ -195,11 +202,10 @@ task test-infra:cluster-down               # Destroy cluster
 task test-infra:cluster-status             # Check cluster health
 task test-infra:install-observability      # Add telemetry stack
 
-# To connect kubectl to the test cluster:
-export KUBECONFIG=.test-infra/kubeconfig
+# Use the wrapper commands (recommended - automatic path detection):
+task test-infra:kubectl -- get nodes    # Run kubectl commands
+task test-infra:k9s                     # Launch k9s terminal UI
 ```
-
-> **Note:** When using from another repository, the kubeconfig will be in `.test-infra/kubeconfig`.
 
 ## Troubleshooting
 
@@ -209,9 +215,8 @@ export KUBECONFIG=.test-infra/kubeconfig
 
 **Permissions** – tools are installed to system directories and may require sudo privileges.
 
-**Kubectl connection** – ensure you've set the KUBECONFIG environment variable:
-```bash
-export KUBECONFIG=./kubeconfig  # From repo root
-# Or when using from another repo:
-export KUBECONFIG=.test-infra/kubeconfig
-```
+**Cluster interaction** – use the wrapper commands for automatic kubeconfig handling:
+- `task kubectl -- <args>` / `task test-infra:kubectl -- <args>` - Run kubectl commands
+- `task k9s` / `task test-infra:k9s` - Launch k9s terminal UI for interactive cluster browsing
+
+These automatically use the correct kubeconfig path without manual setup.

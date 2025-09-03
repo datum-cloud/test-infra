@@ -6,8 +6,14 @@ vars:
   KIND_VERSION: '{{.KIND_VERSION | default "v0.29.0"}}'
   WAIT_TIMEOUT: '{{.WAIT_TIMEOUT | default "300s"}}'
   TOOLS: kind kubectl kustomize flux
-  # Local kubeconfig file in repo root (for test-infra KIND cluster)
-  KUBECONFIG_FILE: '{{.KUBECONFIG_FILE | default "./kubeconfig"}}'
+  # Local kubeconfig file - location depends on context
+  KUBECONFIG_FILE:
+    sh: |
+      if [ -f "cluster/kind-config.yaml" ] && [ -f "components/flux/kustomization.yaml" ]; then
+        echo "./kubeconfig"  # In test-infra repo
+      else
+        echo ".test-infra/kubeconfig"  # External repo
+      fi
   # Detect if we're running in the test-infra repo or externally
   REPO_DIR:
     sh: |
