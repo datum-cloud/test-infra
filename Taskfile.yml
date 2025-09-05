@@ -336,11 +336,12 @@ tasks:
   install-components:
     desc: "All add-ons"
     silent: true
+    deps:
+      - install-flux
+      - install-cert-manager
+      - install-kyverno
+      - install-envoy-gateway-operator
     cmds:
-      - task: install-flux
-      - task: install-cert-manager
-      - task: install-kyverno
-      - task: install-envoy-gateway-operator
       - echo "✅ All cluster components installed successfully"
 
   install-cert-manager:
