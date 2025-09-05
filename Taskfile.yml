@@ -303,6 +303,9 @@ tasks:
             exit 1
           fi
         fi
+      # Always install flux to the cluster so additional components can be
+      # installed using it.
+      - task: install-flux
 
   delete-kind:
     desc: "Delete KIND cluster"
@@ -337,7 +340,6 @@ tasks:
     desc: "All add-ons"
     silent: true
     deps:
-      - install-flux
       - install-cert-manager
       - install-kyverno
       - install-envoy-gateway-operator
