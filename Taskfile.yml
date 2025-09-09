@@ -414,6 +414,24 @@ tasks:
       - kubectl -n flux-system wait helmrelease/tempo --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "⏳ Waiting for Promtail HelmRelease …"
       - kubectl -n flux-system wait helmrelease/promtail --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      - |
+        set -euo pipefail
+        echo "⏳ Waiting for Prometheus CRDs to be Established…"
+        for crd in \
+          servicemonitors.monitoring.coreos.com \
+          podmonitors.monitoring.coreos.com \
+          probes.monitoring.coreos.com \
+          prometheuses.monitoring.coreos.com \
+          prometheusrules.monitoring.coreos.com \
+          alertmanagers.monitoring.coreos.com \
+          thanosrulers.monitoring.coreos.com
+        do
+          echo "$crd"
+          kubectl wait --for=condition=Established "crd/${crd}" --timeout=120s || true
+        done
+      - echo "⏳ Waiting for vmagent & vmsingle to be Ready (best-effort)…"
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n telemetry-system --timeout=120s || true
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout=120s || true
       - echo "➡️  Applying Grafana Instance (after Operator CRDs are ready) …"
       - kubectl apply -f {{.REPO_DIR}}/components/observability/grafana-instance.yaml
       - echo "➡️  Applying Grafana Datasources …"
