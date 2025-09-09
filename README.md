@@ -124,7 +124,7 @@ The modular layout keeps the bootstrap lean while letting teams layer in extra i
 
 ### Optional Components
 
-`task install-observability` - Deploy complete telemetry stack (Victoria Metrics, Loki, Tempo, Grafana with Promtail)
+`task install-observability` - Deploy complete telemetry stack (Victoria Metrics, Loki, Tempo, Grafana with Promtail, and Prometheus CRDs)
 
 Run `task help` to see all available targets and their descriptions.
 
@@ -146,6 +146,7 @@ task install-observability        # Add telemetry stack
 - **Loki** - Log aggregation with container log collection via Promtail
 - **Tempo** - Distributed tracing storage
 - **Grafana** - Unified dashboard (accessible at http://localhost:30000, admin/datum123)
+- **Prometheus CRDs** - Custom resources for advanced metrics scraping and alerting (servicemonitors, podmonitors, etc.)
 
 The observability stack is designed for development and testing environments with appropriate resource limits and simplified configurations.
 
