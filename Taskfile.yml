@@ -429,6 +429,9 @@ tasks:
           echo "$crd"
           kubectl wait --for=condition=Established "crd/${crd}" --timeout=120s || true
         done
+      - echo "⏳ Waiting for vmagent & vmsingle to be Ready (best-effort)…"
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n telemetry-system --timeout=120s || true
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout=120s || true
       - echo "➡️  Applying Grafana Instance (after Operator CRDs are ready) …"
       - kubectl apply -f {{.REPO_DIR}}/components/observability/grafana-instance.yaml
       - echo "➡️  Applying Grafana Datasources …"
