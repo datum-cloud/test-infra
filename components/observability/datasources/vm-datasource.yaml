@@ -13,7 +13,7 @@ spec:
     name: VictoriaMetrics
     type: prometheus
     access: proxy
-    url: http://vmsingle-telemetry-system-vm-stack-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:8428
+    url: http://vmsingle-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:8428
     uid: victoria-metrics-datasource
     isDefault: true
     editable: true
