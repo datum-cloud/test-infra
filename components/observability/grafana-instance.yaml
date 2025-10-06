@@ -14,6 +14,11 @@ spec:
     security:
       admin_user: admin
       admin_password: datum123
+    unified_alerting:
+      enabled: "true"
+      alertmanager_config_from_datasources: "true"
+    alerting:
+      enabled: "false"  # Disable legacy alerting in favor of unified alerting
   service:
     spec:
       type: NodePort

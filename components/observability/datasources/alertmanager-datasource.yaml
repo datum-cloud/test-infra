@@ -1,0 +1,19 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: alertmanager
+  namespace: telemetry-system
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  datasource:
+    name: Alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://vmalertmanager-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:9093
+    isDefault: false
+    editable: true
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: true

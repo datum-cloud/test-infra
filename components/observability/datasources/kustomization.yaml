@@ -4,3 +4,4 @@ resources:
   - vm-datasource.yaml
   - loki-datasource.yaml
   - tempo-datasource.yaml
+  - alertmanager-datasource.yaml
