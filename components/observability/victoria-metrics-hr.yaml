@@ -68,9 +68,29 @@ spec:
     grafana:
       enabled: false
 
-    # VM Alert configuration - disable for test environment
+    # VM Alert configuration - enabled for monitoring and alerting
     vmalert:
-      enabled: false
+      enabled: true
+      spec:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        # Enable evaluation of recording rules and alerts
+        evaluationInterval: "15s"
+        # Configure datasource for querying metrics
+        datasource:
+          url: "http://vmsingle-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:8428"
+        # Configure notifier with a blackhole URL for test environment
+        # This allows alerts to be evaluated without sending notifications
+        notifier:
+          url: "http://localhost:9093"  # Dummy URL - no alertmanager running
+        # Enable remote write for storing alert state
+        remoteWrite:
+          url: "http://vmsingle-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:8428/api/v1/write"
 
     # Alertmanager - disabled for test environment
     alertmanager:
