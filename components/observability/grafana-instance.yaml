@@ -35,7 +35,7 @@ spec:
         spec:
           containers:
             - name: grafana
-              image: grafana/grafana:10.4.3
+              image: grafana/grafana:12.2.0
               resources:
                 requests:
                   cpu: 100m
