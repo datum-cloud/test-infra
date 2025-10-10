@@ -11,8 +11,8 @@ spec:
     name: Alertmanager
     type: alertmanager
     access: proxy
-    url: http://vmalertmanager-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:9093
-    isDefault: false
+    url: http://vmalertmanager-telemetry-system-vm.telemetry-system.svc.cluster.local:9093
+    isDefault: true
     editable: true
     jsonData:
       implementation: prometheus

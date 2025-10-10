@@ -23,6 +23,7 @@ spec:
     remediation:
       retries: 3
   values:
+    nameOverride: "vm"
     # Enable Grafana Operator integration
     defaultDashboards:
       grafanaOperator:
@@ -83,13 +84,13 @@ spec:
         evaluationInterval: "15s"
         # Configure datasource for querying metrics
         datasource:
-          url: "http://vmsingle-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:8428"
+          url: "http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428"
         # Configure notifier to use Alertmanager
         notifier:
-          url: "http://vmalertmanager-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:9093"
+          url: "http://vmalertmanager-telemetry-system-vm.telemetry-system.svc.cluster.local:9093"
         # Enable remote write for storing alert state
         remoteWrite:
-          url: "http://vmsingle-telemetry-system-vm-victoria-metrics-k8s-stack.telemetry-system.svc.cluster.local:8428/api/v1/write"
+          url: "http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428/api/v1/write"
 
     # Alertmanager - enabled for test environment
     alertmanager:
