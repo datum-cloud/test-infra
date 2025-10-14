@@ -23,6 +23,7 @@ spec:
     remediation:
       retries: 3
   values:
+    nameOverride: "vm"
     # Enable Grafana Operator integration
     defaultDashboards:
       grafanaOperator:
@@ -68,13 +69,41 @@ spec:
     grafana:
       enabled: false
 
-    # VM Alert configuration - disable for test environment
+    # VM Alert configuration - enabled for monitoring and alerting
     vmalert:
-      enabled: false
+      enabled: true
+      spec:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        # Enable evaluation of recording rules and alerts
+        evaluationInterval: "15s"
+        # Configure datasource for querying metrics
+        datasource:
+          url: "http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428"
+        # Configure notifier to use Alertmanager
+        notifier:
+          url: "http://vmalertmanager-telemetry-system-vm.telemetry-system.svc.cluster.local:9093"
+        # Enable remote write for storing alert state
+        remoteWrite:
+          url: "http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428/api/v1/write"
 
-    # Alertmanager - disabled for test environment
+    # Alertmanager - enabled for test environment
     alertmanager:
-      enabled: false
+      enabled: true
+      spec:
+        replicaCount: 1
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
 
     # Node exporter - configured for single-node KIND environment
     nodeExporter:

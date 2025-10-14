@@ -3,3 +3,10 @@ kind: Kustomization
 resources:
   # Using installer manifests from Flux v2.3.0
   - github.com/fluxcd/flux2/manifests/install?ref=v2.7.2
+
+patches:
+  - target:
+      kind: Deployment
+      name: kustomize-controller
+      namespace: flux-system
+    path: kustomize-controller-patch.yaml
