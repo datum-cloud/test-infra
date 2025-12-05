@@ -1,0 +1,13 @@
+# Configure the cluster's audit log policy.
+#
+# See: https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# Only capture the ResponseComplete stage. This stage will include the full
+# request / response body when the RequestResponse level is used.
+omitStages:
+  - RequestReceived
+  - ResponseStarted
+  - Panic
+rules:
+- level: RequestResponse

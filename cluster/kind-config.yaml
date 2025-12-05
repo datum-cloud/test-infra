@@ -13,3 +13,31 @@ nodes:
       - containerPort: 30443
         hostPort: 30443
         protocol: TCP
+
+    # Add audit log configurations
+    kubeadmConfigPatches:
+    - |
+      kind: ClusterConfiguration
+      apiServer:
+          extraArgs:
+            audit-policy-file: /etc/kubernetes/policies/audit-policy.yaml
+            audit-log-path: /var/log/kubernetes/kube-apiserver-audit.log
+          extraVolumes:
+            - name: audit-policies
+              hostPath: /etc/kubernetes/policies
+              mountPath: /etc/kubernetes/policies
+              readOnly: true
+              pathType: "DirectoryOrCreate"
+            - name: "audit-logs"
+              hostPath: "/var/log/kubernetes"
+              mountPath: "/var/log/kubernetes"
+              readOnly: false
+              pathType: DirectoryOrCreate
+    # mount the local file on the control plane
+    extraMounts:
+    # The filepath is relative to where the `kind` command is run to start the
+    # cluster. Assume the user is using the taskfile to start the cluster in the
+    # root of the repo.
+    - hostPath: ./.test-infra/cluster/audit-policy.yaml
+      containerPath: /etc/kubernetes/policies/audit-policy.yaml
+      readOnly: true
