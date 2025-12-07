@@ -6,7 +6,7 @@ set -euo pipefail
 
 TOOLS=("$@")
 
-KIND_VERSION="${KIND_VERSION:-v0.29.0}"
+KIND_VERSION="${KIND_VERSION:-v0.30.0}"
 
 # Detect OS/arch once, normalise
 OS=$(uname | tr '[:upper:]' '[:lower:]')

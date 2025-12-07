@@ -3,7 +3,7 @@ version: '3'
 vars:
   CLUSTER_NAME: '{{.CLUSTER_NAME | default "test-infra"}}'
   K8S_VERSION: '{{.K8S_VERSION | default "v1.32.0"}}'
-  KIND_VERSION: '{{.KIND_VERSION | default "v0.29.0"}}'
+  KIND_VERSION: '{{.KIND_VERSION | default "v0.30.0"}}'
   WAIT_TIMEOUT: '{{.WAIT_TIMEOUT | default "300s"}}'
   TOOLS: kind kubectl kustomize flux
   # Local kubeconfig file - location depends on context
@@ -122,6 +122,8 @@ tasks:
   # high-level targets
   #------------------------------------------------------------------------------
   cluster-up:
+    aliases:
+      - up
     desc: "Spin everything up"
     silent: true
     cmds:
@@ -154,6 +156,8 @@ tasks:
 
   cluster-down:
     desc: "Delete the cluster"
+    aliases:
+      - down
     cmds:
       - task: delete-kind
 
