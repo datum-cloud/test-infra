@@ -1,9 +1,7 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: ${CLUSTER_NAME:-test-infra}
 nodes:
   - role: control-plane
-    image: kindest/node:${K8S_VERSION:-v1.32.0}
     extraPortMappings:
       # Grafana (Observability)
       - containerPort: 30000
@@ -35,9 +33,9 @@ nodes:
               pathType: DirectoryOrCreate
     # mount the local file on the control plane
     extraMounts:
-    # The filepath is relative to where the `kind` command is run to start the
-    # cluster. Assume the user is using the taskfile to start the cluster in the
-    # root of the repo.
-    - hostPath: ./.test-infra/cluster/audit-policy.yaml
+    # The filepath is dynamically set via REPO_DIR environment variable by the Taskfile.
+    # When running in test-infra repo: ./cluster/audit-policy.yaml
+    # When running from external repo: ./.test-infra/cluster/audit-policy.yaml
+    - hostPath: ${REPO_DIR}/cluster/audit-policy.yaml
       containerPath: /etc/kubernetes/policies/audit-policy.yaml
       readOnly: true
