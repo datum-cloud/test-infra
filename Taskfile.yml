@@ -3,7 +3,7 @@ version: '3'
 vars:
   CLUSTER_NAME: '{{.CLUSTER_NAME | default "test-infra"}}'
   K8S_VERSION: '{{.K8S_VERSION | default "v1.32.0"}}'
-  KIND_VERSION: '{{.KIND_VERSION | default "v0.29.0"}}'
+  KIND_VERSION: '{{.KIND_VERSION | default "v0.30.0"}}'
   WAIT_TIMEOUT: '{{.WAIT_TIMEOUT | default "300s"}}'
   TOOLS: kind kubectl kustomize flux
   # Local kubeconfig file - location depends on context
@@ -122,6 +122,8 @@ tasks:
   # high-level targets
   #------------------------------------------------------------------------------
   cluster-up:
+    aliases:
+      - up
     desc: "Spin everything up"
     silent: true
     cmds:
@@ -154,6 +156,8 @@ tasks:
 
   cluster-down:
     desc: "Delete the cluster"
+    aliases:
+      - down
     cmds:
       - task: delete-kind
 
@@ -279,8 +283,12 @@ tasks:
             exit 1
           fi
 
-          # Create cluster with error handling and custom kubeconfig
-          if kind create cluster --name {{.CLUSTER_NAME}} --image kindest/node:{{.K8S_VERSION}} --config {{.KIND_CFG}} --kubeconfig {{.KUBECONFIG_FILE}}; then
+          # Export REPO_DIR for envsubst to substitute audit policy path in KIND config
+          # KIND doesn't natively support env var substitution, so we preprocess with envsubst
+          export REPO_DIR="{{.REPO_DIR}}"
+
+          # Process KIND config and create cluster (--name and --image override config values)
+          if envsubst < {{.KIND_CFG}} | kind create cluster --name {{.CLUSTER_NAME}} --image kindest/node:{{.K8S_VERSION}} --config - --kubeconfig {{.KUBECONFIG_FILE}}; then
             echo "✅ KIND cluster created successfully"
             echo "📝 Test-infra cluster kubeconfig written to: {{.KUBECONFIG_FILE}}"
 

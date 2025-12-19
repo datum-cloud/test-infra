@@ -23,7 +23,7 @@ spec:
     remediation:
       retries: 3
   values:
-    watchNamespaces: "telemetry-system"
+    watchNamespaces: ""
     resources:
       requests:
         cpu: 100m
