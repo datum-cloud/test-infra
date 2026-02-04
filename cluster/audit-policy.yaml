@@ -10,4 +10,79 @@ omitStages:
   - ResponseStarted
   - Panic
 rules:
+# Skip logging for non-resource URLs (health checks, metrics, etc.)
+- level: None
+  nonResourceURLs:
+    - /healthz*
+    - /readyz*
+    - /livez*
+    - /metrics
+    - /metrics/*
+
+# Skip logging for leases (leader election, node heartbeats)
+- level: None
+  resources:
+    - group: coordination.k8s.io
+      resources:
+        - leases
+
+# Skip logging for events (very noisy)
+- level: None
+  resources:
+    - group: ""
+      resources:
+        - events
+
+# Skip logging for endpoint slices (frequent updates)
+- level: None
+  resources:
+    - group: discovery.k8s.io
+      resources:
+        - endpointslices
+
+# Skip logging for node status updates
+- level: None
+  resources:
+    - group: ""
+      resources:
+        - nodes/status
+
+# Skip logging for service account token requests
+- level: None
+  resources:
+    - group: ""
+      resources:
+        - serviceaccounts/token
+
+# Skip logging for subject access reviews (authorization checks)
+- level: None
+  resources:
+    - group: authorization.k8s.io
+      resources:
+        - subjectaccessreviews
+        - selfsubjectaccessreviews
+        - selfsubjectrulesreviews
+        - localsubjectaccessreviews
+
+# Skip logging for system:nodes and system:serviceaccounts
+- level: None
+  users:
+    - system:kube-scheduler
+    - system:kube-controller-manager
+    - system:kube-proxy
+  verbs:
+    - get
+    - list
+    - watch
+
+# Skip logging for kubelet read operations
+- level: None
+  userGroups:
+    - system:nodes
+  verbs:
+    - get
+    - list
+    - watch
+
+# Log everything else at RequestResponse level
 - level: RequestResponse
