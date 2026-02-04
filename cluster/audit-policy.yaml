@@ -18,6 +18,7 @@ rules:
     - /livez*
     - /metrics
     - /metrics/*
+    - /openapi/v3
 
 # Skip logging for leases (leader election, node heartbeats)
 - level: None
