@@ -84,5 +84,13 @@ rules:
     - list
     - watch
 
-# Log everything else at RequestResponse level
+# Log modify operations with full request / response
 - level: RequestResponse
+  verbs:
+  - create
+  - update
+  - patch
+  - delete
+
+# Log everything else at Request level
+- level: Request
