@@ -21,6 +21,7 @@ rules:
     - /openapi*
     - /openapi/v3
     - /version*
+    - /apis
 
 # Skip logging for leases (leader election, node heartbeats)
 - level: None
