@@ -22,7 +22,7 @@ rules:
     - /openapi/v3
     - /version*
     - /apis
-    - /api
+    - /api*
 
 # Skip logging for leases (leader election, node heartbeats)
 - level: None
@@ -68,6 +68,7 @@ rules:
         - selfsubjectaccessreviews
         - selfsubjectrulesreviews
         - localsubjectaccessreviews
+        - tokenreviews
 
 # Skip logging for system:nodes and system:serviceaccounts
 - level: None
