@@ -24,6 +24,11 @@ spec:
                   targetPort: 8443
                   nodePort: 30443
                   protocol: TCP
+                - name: http
+                  port: 8080
+                  targetPort: 8080
+                  nodePort: 30080
+                  protocol: TCP
       envoyDeployment:
         container:
           resources:
@@ -62,6 +67,12 @@ metadata:
 spec:
   gatewayClassName: merged-gateway
   listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces:
+          from: All
     - name: https
       protocol: HTTPS
       port: 8443
