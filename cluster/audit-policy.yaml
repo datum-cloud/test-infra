@@ -90,6 +90,11 @@ rules:
     - list
     - watch
 
+# Skip logging for watch requests (very noisy, long-lived connections)
+- level: None
+  verbs:
+    - watch
+
 # Log modify operations with full request / response
 - level: RequestResponse
   verbs:
