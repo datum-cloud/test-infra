@@ -59,7 +59,7 @@ rules:
       resources:
         - serviceaccounts/token
 
-# Skip logging for subject access reviews (authorization checks)
+# Skip noisy authentication / authorization requests
 - level: None
   resources:
     - group: authorization.k8s.io
@@ -68,6 +68,8 @@ rules:
         - selfsubjectaccessreviews
         - selfsubjectrulesreviews
         - localsubjectaccessreviews
+    - group: authentication.k9s.io
+      resources:
         - tokenreviews
 
 # Skip logging for system:nodes and system:serviceaccounts
