@@ -111,6 +111,13 @@ tasks:
       - echo "  kind-load-image         Load images into KIND"
       - echo "  kind-save-image         Save image tarball artifact"
       - echo ""
+      - echo "🔌 Remote Debugging (Telepresence):"
+      - echo "  telepresence:install    Install Telepresence CLI"
+      - echo "  telepresence:connect    Connect to the cluster"
+      - echo "  telepresence:intercept  Intercept a service (SERVICE=name NAMESPACE=ns PORT=port)"
+      - echo "  telepresence:status     Show connection status"
+      - echo "  telepresence:quit       Disconnect"
+      - echo ""
       - 'echo "For detailed help: task --list"'
       - 'echo "To run a command: task <command-name>"'
 
@@ -485,3 +492,126 @@ tasks:
         msg: 'ERROR: set TAR=<file> as argument'
     cmds:
       - docker save "{{.IMAGE}}" | gzip > "{{.TAR}}"
+
+  # ------------------------------------------------------------------
+  # Telepresence - Remote debugging
+  # ------------------------------------------------------------------
+  telepresence:install:
+    desc: "Install Telepresence CLI for remote debugging"
+    silent: true
+    cmds:
+      - |
+        set -e
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64) ARCH="amd64" ;;
+          aarch64|arm64) ARCH="arm64" ;;
+        esac
+
+        if command -v telepresence &> /dev/null; then
+          CURRENT_VERSION=$(telepresence version 2>/dev/null | head -1 | awk '{print $2}')
+          echo "Telepresence already installed: $CURRENT_VERSION"
+          echo "Run 'telepresence version' to check for updates"
+          exit 0
+        fi
+
+        echo "Downloading Telepresence for $OS/$ARCH..."
+
+        case "$OS" in
+          darwin)
+            brew install datawire/blackbird/telepresence
+            ;;
+          linux)
+            curl -fL https://app.getambassador.io/download/tel2oss/releases/download/v2.18.0/telepresence-${OS}-${ARCH} -o /tmp/telepresence
+            chmod +x /tmp/telepresence
+            sudo mv /tmp/telepresence /usr/local/bin/telepresence
+            ;;
+          *)
+            echo "❌ Unsupported OS: $OS"
+            exit 1
+            ;;
+        esac
+
+        echo "✅ Telepresence installed successfully"
+        telepresence version
+
+  telepresence:connect:
+    desc: "Connect Telepresence to the cluster"
+    silent: true
+    cmds:
+      - |
+        set -e
+
+        if [ ! -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "❌ Kubeconfig not found at {{.KUBECONFIG_FILE}}"
+          echo "💡 Run 'task cluster-up' first to create the cluster"
+          exit 1
+        fi
+
+        # Install traffic manager if not present
+        if ! kubectl --kubeconfig {{.KUBECONFIG_FILE}} get deploy traffic-manager -n ambassador >/dev/null 2>&1; then
+          echo "Installing Telepresence Traffic Manager..."
+          KUBECONFIG={{.KUBECONFIG_FILE}} telepresence helm install
+        fi
+
+        KUBECONFIG={{.KUBECONFIG_FILE}} telepresence connect
+        echo ""
+        echo "✅ Connected to cluster via Telepresence"
+        echo ""
+        echo "You can now:"
+        echo "  - Access cluster services directly (e.g., curl http://service.namespace)"
+        echo "  - Intercept services: task telepresence:intercept SERVICE=<name> NAMESPACE=<ns>"
+        echo "  - Disconnect: telepresence quit"
+
+  telepresence:intercept:
+    desc: "Intercept a service for local debugging (SERVICE=name NAMESPACE=ns PORT=port)"
+    silent: true
+    vars:
+      SERVICE: '{{.SERVICE}}'
+      NAMESPACE: '{{.NAMESPACE | default "default"}}'
+      PORT: '{{.PORT | default "8080"}}'
+    preconditions:
+      - sh: '[ -n "{{.SERVICE}}" ]'
+        msg: 'ERROR: set SERVICE=<name> as argument'
+    cmds:
+      - |
+        set -e
+
+        if [ ! -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "❌ Kubeconfig not found at {{.KUBECONFIG_FILE}}"
+          echo "💡 Run 'task cluster-up' first to create the cluster"
+          exit 1
+        fi
+
+        # Connect if not already connected
+        if ! telepresence status 2>/dev/null | grep -q "Connected"; then
+          echo "Not connected. Connecting first..."
+          KUBECONFIG={{.KUBECONFIG_FILE}} telepresence connect
+        fi
+
+        KUBECONFIG={{.KUBECONFIG_FILE}} telepresence intercept {{.SERVICE}} \
+          --namespace {{.NAMESPACE}} \
+          --port {{.PORT}}:{{.PORT}} \
+          --env-file /tmp/telepresence-{{.SERVICE}}.env
+
+        echo ""
+        echo "✅ Intercepting {{.SERVICE}}"
+        echo ""
+        echo "Environment variables saved to: /tmp/telepresence-{{.SERVICE}}.env"
+        echo "Source them with: source /tmp/telepresence-{{.SERVICE}}.env"
+        echo ""
+        echo "To stop: telepresence leave {{.SERVICE}}"
+
+  telepresence:status:
+    desc: "Show Telepresence connection and intercept status"
+    silent: true
+    cmds:
+      - telepresence status
+
+  telepresence:quit:
+    desc: "Disconnect from Telepresence"
+    silent: true
+    cmds:
+      - telepresence quit
+      - echo "✅ Disconnected from Telepresence"

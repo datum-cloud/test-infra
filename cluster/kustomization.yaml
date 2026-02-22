@@ -8,3 +8,4 @@ resources:
   - ../components/cert-manager
   - ../components/kyverno
   - ../components/envoy-gateway-operator
+  - ../components/telepresence
