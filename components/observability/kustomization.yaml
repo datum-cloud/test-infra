@@ -7,7 +7,9 @@ resources:
   - victoria-metrics-hr.yaml
   - loki-hr.yaml
   - tempo-hr.yaml
-  - promtail-hr.yaml
+  - otel-collector/helm-repository.yaml
+  - otel-collector/helm-release-operator.yaml
+  - otel-collector/opentelemetry-collector.yaml
   # Prometheus Operator CRDs
   - https://github.com/prometheus-operator/prometheus-operator/releases/download/v0.81.0/stripped-down-crds.yaml
 

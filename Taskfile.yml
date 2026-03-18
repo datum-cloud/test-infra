@@ -406,7 +406,7 @@ tasks:
       - echo "   kubectl get svc -n envoy-gateway-system -l app.kubernetes.io/name=envoy"
 
   install-observability:
-    desc: "[OPTIONAL] Deploy complete observability stack (Victoria Metrics, Loki, Tempo, Grafana)"
+    desc: "[OPTIONAL] Deploy complete observability stack (Victoria Metrics, Loki, Tempo, Grafana, OTel)"
     silent: true
     cmds:
       - task: ensure-repo
@@ -420,8 +420,8 @@ tasks:
       - kubectl -n flux-system wait helmrelease/loki --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "⏳ Waiting for Tempo HelmRelease …"
       - kubectl -n flux-system wait helmrelease/tempo --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
-      - echo "⏳ Waiting for Promtail HelmRelease …"
-      - kubectl -n flux-system wait helmrelease/promtail --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      - echo "⏳ Waiting for OpenTelemetry Operator HelmRelease …"
+      - kubectl -n flux-system wait helmrelease/opentelemetry-operator --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - |
         set -euo pipefail
         echo "⏳ Waiting for Prometheus CRDs to be Established…"
@@ -440,6 +440,12 @@ tasks:
       - echo "⏳ Waiting for vmagent & vmsingle to be Ready (best-effort)…"
       - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n telemetry-system --timeout=120s || true
       - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout=120s || true
+      - echo "⏳ Waiting for OpenTelemetryCollector CRD to be Established …"
+      - kubectl wait --for=condition=Established crd/opentelemetrycollectors.opentelemetry.io --timeout={{.WAIT_TIMEOUT}}
+      - echo "➡️  Applying OpenTelemetryCollector CR …"
+      - kubectl apply -f {{.REPO_DIR}}/components/observability/otel-collector/opentelemetry-collector.yaml
+      - echo "⏳ Waiting for OTel Collector DaemonSet …"
+      - kubectl -n telemetry-system rollout status daemonset/otel-collector-collector --timeout={{.WAIT_TIMEOUT}}
       - echo "➡️  Applying Grafana Instance (after Operator CRDs are ready) …"
       - kubectl apply -f {{.REPO_DIR}}/components/observability/grafana-instance.yaml
       - echo "➡️  Applying Grafana Datasources …"
