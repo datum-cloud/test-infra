@@ -1,0 +1,33 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: opentelemetry-operator
+  namespace: flux-system
+spec:
+  interval: 5m
+  targetNamespace: telemetry-system
+  chart:
+    spec:
+      chart: opentelemetry-operator
+      version: "0.107.2"
+      sourceRef:
+        kind: HelmRepository
+        name: opentelemetry
+        namespace: flux-system
+      interval: 5m
+  values:
+    manager:
+      collectorImage:
+        repository: otel/opentelemetry-collector-contrib
+        tag: "0.147.0"
+      createRbacPermissions: true
+    admissionWebhooks:
+      certManager:
+        enabled: true
+      namespaceSelector:
+        matchExpressions:
+          - key: kubernetes.io/metadata.name
+            operator: NotIn
+            values:
+              - kube-system
+              - kube-node-lease
