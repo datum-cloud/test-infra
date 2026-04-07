@@ -24,8 +24,9 @@ install_kind() {
     current="$(kind --version 2>/dev/null | awk '{print $3}')"
   fi
 
-  if [ "$current" = "$wanted" ]; then
-    echo "✅ kind $current already installed"
+  # Accept any version >= wanted (compare semver numerically)
+  if [ -n "$current" ] && printf '%s\n%s\n' "$wanted" "$current" | sort -V -C 2>/dev/null; then
+    echo "✅ kind $current already installed (>= $wanted)"
     return 0
   fi
 
