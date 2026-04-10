@@ -11,8 +11,10 @@ vars:
     sh: |
       if [ -f "cluster/kind-config.yaml" ] && [ -f "components/flux/kustomization.yaml" ]; then
         echo "./kubeconfig"  # In test-infra repo
+      elif [ -n "$KUBECONFIG" ] && [ -f "$KUBECONFIG" ]; then
+        echo "$KUBECONFIG"  # External repo: use KUBECONFIG env var if set and file exists
       else
-        echo ".test-infra/kubeconfig"  # External repo
+        echo ".test-infra/kubeconfig"  # External repo: default fallback
       fi
   # Detect if we're running in the test-infra repo or externally
   REPO_DIR:
