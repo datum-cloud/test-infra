@@ -107,7 +107,15 @@ tasks:
       - echo "  install-cert-manager    Deploy cert-manager + CSI driver"
       - echo "  install-kyverno         Deploy Kyverno policy engine"
       - echo "  install-envoy-gateway-operator  Deploy Envoy Gateway"
-      - echo "  install-observability   [OPTIONAL] Deploy telemetry stack"
+      - echo ""
+      - echo "📊 Observability (composable):"
+      - echo "  install-observability       [OPTIONAL] Deploy full telemetry stack"
+      - echo "  install-prometheus-crds     Prometheus Operator CRDs"
+      - echo "  install-victoria-metrics    Victoria Metrics (vmagent + vmsingle)"
+      - echo "  install-otel-collector      OpenTelemetry Operator + Collector"
+      - echo "  install-grafana             Grafana Operator + instance + datasources"
+      - echo "  install-loki                Loki for log aggregation"
+      - echo "  install-tempo               Tempo for distributed tracing"
       - echo ""
       - echo "🔨 CI/Development:"
       - echo "  kind-load-image         Load images into KIND"
@@ -407,26 +415,16 @@ tasks:
       - echo "   To find the actual NodePort assignments, run:"
       - echo "   kubectl get svc -n envoy-gateway-system -l app.kubernetes.io/name=envoy"
 
-  install-observability:
-    desc: "[OPTIONAL] Deploy complete observability stack (Victoria Metrics, Loki, Tempo, Grafana, OTel)"
+  install-prometheus-crds:
+    desc: "Deploy Prometheus Operator CRDs"
     silent: true
     cmds:
       - task: ensure-repo
-      - echo "➡️  Reconciling Observability Stack …"
-      - kustomize build {{.REPO_DIR}}/components/observability | kubectl apply -f -
-      - echo "⏳ Waiting for Grafana Operator HelmRelease …"
-      - kubectl -n flux-system wait helmrelease/grafana-operator --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
-      - echo "⏳ Waiting for Victoria Metrics Stack HelmRelease …"
-      - kubectl -n flux-system wait helmrelease/vm --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
-      - echo "⏳ Waiting for Loki HelmRelease …"
-      - kubectl -n flux-system wait helmrelease/loki --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
-      - echo "⏳ Waiting for Tempo HelmRelease …"
-      - kubectl -n flux-system wait helmrelease/tempo --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
-      - echo "⏳ Waiting for OpenTelemetry Operator HelmRelease …"
-      - kubectl -n flux-system wait helmrelease/opentelemetry-operator --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      - echo "➡️  Reconciling Prometheus Operator CRDs …"
+      - kustomize build {{.REPO_DIR}}/components/observability/prometheus-crds | kubectl apply --server-side --force-conflicts -f -
       - |
         set -euo pipefail
-        echo "⏳ Waiting for Prometheus CRDs to be Established…"
+        echo "⏳ Waiting for Prometheus CRDs to be Established …"
         for crd in \
           servicemonitors.monitoring.coreos.com \
           podmonitors.monitoring.coreos.com \
@@ -436,22 +434,106 @@ tasks:
           alertmanagers.monitoring.coreos.com \
           thanosrulers.monitoring.coreos.com
         do
-          echo "$crd"
+          echo "  $crd"
           kubectl wait --for=condition=Established "crd/${crd}" --timeout=120s || true
         done
-      - echo "⏳ Waiting for vmagent & vmsingle to be Ready (best-effort)…"
-      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n telemetry-system --timeout=120s || true
-      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout=120s || true
+      - echo "✅ Prometheus Operator CRDs are ready"
+
+  install-victoria-metrics:
+    desc: "Deploy Victoria Metrics (vmagent + vmsingle)"
+    silent: true
+    deps: [install-prometheus-crds]
+    cmds:
+      - task: ensure-repo
+      - echo "➡️  Reconciling Victoria Metrics …"
+      - kustomize build {{.REPO_DIR}}/components/observability/victoria-metrics | kubectl apply -f -
+      - echo "⏳ Waiting for Victoria Metrics Stack HelmRelease …"
+      - kubectl -n flux-system wait helmrelease/vm --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      - echo "⏳ Waiting for vmagent & vmsingle to be Ready …"
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n telemetry-system --timeout={{.WAIT_TIMEOUT}} || true
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout={{.WAIT_TIMEOUT}} || true
+      - echo "✅ Victoria Metrics is ready"
+
+  install-otel-collector:
+    desc: "Deploy OpenTelemetry Operator + Collector"
+    silent: true
+    cmds:
+      - task: ensure-repo
+      - echo "➡️  Reconciling OpenTelemetry Operator …"
+      - kustomize build {{.REPO_DIR}}/components/observability/otel-collector | kubectl apply -f -
+      - echo "⏳ Waiting for OpenTelemetry Operator HelmRelease …"
+      - kubectl -n flux-system wait helmrelease/opentelemetry-operator --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "⏳ Waiting for OpenTelemetryCollector CRD to be Established …"
       - kubectl wait --for=condition=Established crd/opentelemetrycollectors.opentelemetry.io --timeout={{.WAIT_TIMEOUT}}
-      - echo "➡️  Applying OpenTelemetryCollector CR …"
-      - kubectl apply -f {{.REPO_DIR}}/components/observability/otel-collector/opentelemetry-collector.yaml
+      - |
+        echo "⏳ Waiting for OTel webhook to be ready …"
+        sleep 10
+      - echo "➡️  Applying OpenTelemetryCollector CR (with retry for webhook readiness) …"
+      - |
+        set -euo pipefail
+        for i in 1 2 3 4 5; do
+          if kubectl apply -f {{.REPO_DIR}}/components/observability/otel-collector/opentelemetry-collector.yaml 2>/dev/null; then
+            echo "  CR applied successfully"
+            break
+          fi
+          echo "  Attempt $i failed, retrying in 10s …"
+          sleep 10
+        done
       - echo "⏳ Waiting for OTel Collector DaemonSet …"
       - kubectl -n telemetry-system rollout status daemonset/otel-collector-collector --timeout={{.WAIT_TIMEOUT}}
+      - echo "✅ OpenTelemetry Collector is ready"
+
+  install-grafana:
+    desc: "Deploy Grafana Operator + instance + datasources"
+    silent: true
+    deps: [install-victoria-metrics]
+    cmds:
+      - task: ensure-repo
+      - echo "➡️  Reconciling Grafana Operator …"
+      - kustomize build {{.REPO_DIR}}/components/observability/grafana | kubectl apply -f -
+      - echo "⏳ Waiting for Grafana Operator HelmRelease …"
+      - kubectl -n flux-system wait helmrelease/grafana-operator --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "➡️  Applying Grafana Instance (after Operator CRDs are ready) …"
-      - kubectl apply -f {{.REPO_DIR}}/components/observability/grafana-instance.yaml
+      - kubectl apply -f {{.REPO_DIR}}/components/observability/grafana/grafana-instance.yaml
       - echo "➡️  Applying Grafana Datasources …"
-      - kustomize build {{.REPO_DIR}}/components/observability/datasources | kubectl apply -f -
+      - kustomize build {{.REPO_DIR}}/components/observability/grafana/datasources | kubectl apply -f -
+      - echo "✅ Grafana is ready"
+      - echo ""
+      - 'echo "📊 Access Grafana at: http://localhost:30000"'
+      - 'echo "   Username: admin"'
+      - 'echo "   Password: datum123"'
+
+  install-loki:
+    desc: "Deploy Loki for log aggregation"
+    silent: true
+    cmds:
+      - task: ensure-repo
+      - echo "➡️  Reconciling Loki …"
+      - kustomize build {{.REPO_DIR}}/components/observability/loki | kubectl apply -f -
+      - echo "⏳ Waiting for Loki HelmRelease …"
+      - kubectl -n flux-system wait helmrelease/loki --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      - echo "✅ Loki is ready"
+
+  install-tempo:
+    desc: "Deploy Tempo for distributed tracing"
+    silent: true
+    cmds:
+      - task: ensure-repo
+      - echo "➡️  Reconciling Tempo …"
+      - kustomize build {{.REPO_DIR}}/components/observability/tempo | kubectl apply -f -
+      - echo "⏳ Waiting for Tempo HelmRelease …"
+      - kubectl -n flux-system wait helmrelease/tempo --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      - echo "✅ Tempo is ready"
+
+  install-observability:
+    desc: "[OPTIONAL] Deploy complete observability stack (Victoria Metrics, Loki, Tempo, Grafana, OTel)"
+    silent: true
+    cmds:
+      - task: install-victoria-metrics
+      - task: install-otel-collector
+      - task: install-loki
+      - task: install-tempo
+      - task: install-grafana
       - echo "✅ Observability stack is ready"
       - echo ""
       - 'echo "📊 Access Grafana at: http://localhost:30000"'

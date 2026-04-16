@@ -1,0 +1,54 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: tempo-datasource
+  namespace: telemetry-system
+  labels:
+    dashboards: "grafana"
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  datasource:
+    name: Tempo
+    type: tempo
+    access: proxy
+    url: http://telemetry-system-tempo.telemetry-system.svc.cluster.local:3100
+    uid: tempo-datasource
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogs:
+        datasourceUid: loki-datasource
+        tags:
+          - job
+          - instance
+          - pod
+          - namespace
+        mappedTags:
+          - key: service.name
+            value: service
+        mapTagNamesEnabled: true
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        filterBySpanID: false
+      tracesToMetrics:
+        datasourceUid: victoria-metrics-datasource
+        tags:
+          - job
+          - instance
+          - pod
+          - namespace
+        queries:
+          - name: "Request Rate"
+            query: 'rate(tempo_request_duration_seconds_count[$__rate_interval])'
+      serviceMap:
+        datasourceUid: victoria-metrics-datasource
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      lokiSearch:
+        datasourceUid: loki-datasource
