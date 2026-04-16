@@ -25,9 +25,12 @@ spec:
   values:
     nameOverride: "vm"
     # Enable Grafana Operator integration
+    # Default is false so the VM chart can install standalone without the
+    # grafana-operator CRDs. The root observability kustomization patches this
+    # back to true when the full stack is installed together.
     defaultDashboards:
       grafanaOperator:
-        enabled: true
+        enabled: false
         spec:
           instanceSelector:
             matchLabels:

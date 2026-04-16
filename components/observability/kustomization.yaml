@@ -7,3 +7,18 @@ resources:
   - loki
   - tempo
   - grafana
+# When the full observability stack is installed together, grafana-operator is
+# present, so flip the VM chart's grafana-dashboard generation back on. The
+# per-component (composable) VM install leaves this at false so it does not
+# depend on the Grafana CRDs.
+patches:
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+      name: vm
+      namespace: flux-system
+    patch: |
+      - op: replace
+        path: /spec/values/defaultDashboards/grafanaOperator/enabled
+        value: true
