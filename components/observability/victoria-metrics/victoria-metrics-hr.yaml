@@ -6,7 +6,7 @@ metadata:
 spec:
   interval: 15m
   timeout: 10m
-  targetNamespace: telemetry-system
+  targetNamespace: victoria-metrics-system
   chart:
     spec:
       chart: victoria-metrics-k8s-stack
@@ -25,14 +25,17 @@ spec:
   values:
     nameOverride: "vm"
     # Enable Grafana Operator integration
+    # Default is false so the VM chart can install standalone without the
+    # grafana-operator CRDs. The root observability kustomization patches this
+    # back to true when the full stack is installed together.
     defaultDashboards:
       grafanaOperator:
-        enabled: true
+        enabled: false
         spec:
           instanceSelector:
             matchLabels:
               dashboards: "grafana"
-          allowCrossNamespaceImport: false
+          allowCrossNamespaceImport: true
 
     # Victoria Metrics Single configuration
     vmsingle:
@@ -84,13 +87,13 @@ spec:
         evaluationInterval: "15s"
         # Configure datasource for querying metrics
         datasource:
-          url: "http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428"
+          url: "http://vmsingle-victoria-metrics-system-vm.victoria-metrics-system.svc.cluster.local:8428"
         # Configure notifier to use Alertmanager
         notifier:
-          url: "http://vmalertmanager-telemetry-system-vm.telemetry-system.svc.cluster.local:9093"
+          url: "http://vmalertmanager-victoria-metrics-system-vm.victoria-metrics-system.svc.cluster.local:9093"
         # Enable remote write for storing alert state
         remoteWrite:
-          url: "http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428/api/v1/write"
+          url: "http://vmsingle-victoria-metrics-system-vm.victoria-metrics-system.svc.cluster.local:8428/api/v1/write"
 
     # Alertmanager - enabled for test environment
     alertmanager:

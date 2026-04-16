@@ -2,7 +2,7 @@ apiVersion: opentelemetry.io/v1beta1
 kind: OpenTelemetryCollector
 metadata:
   name: otel-collector
-  namespace: telemetry-system
+  namespace: otel-collector-system
 spec:
   managementState: managed
   mode: daemonset
@@ -117,15 +117,15 @@ spec:
 
     exporters:
       otlphttp/tempo:
-        endpoint: http://telemetry-system-tempo.telemetry-system.svc.cluster.local:4318
+        endpoint: http://tempo-system-tempo.tempo-system.svc.cluster.local:4318
         tls:
           insecure: true
       prometheusremotewrite:
-        endpoint: http://vmsingle-telemetry-system-vm.telemetry-system.svc.cluster.local:8428/api/v1/write
+        endpoint: http://vmsingle-victoria-metrics-system-vm.victoria-metrics-system.svc.cluster.local:8428/api/v1/write
         tls:
           insecure: true
       otlphttp/loki:
-        endpoint: http://telemetry-system-loki.telemetry-system.svc.cluster.local:3100/otlp
+        endpoint: http://loki-system-loki.loki-system.svc.cluster.local:3100/otlp
         tls:
           insecure: true
 

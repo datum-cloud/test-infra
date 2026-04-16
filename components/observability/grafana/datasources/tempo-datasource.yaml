@@ -2,7 +2,7 @@ apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDatasource
 metadata:
   name: tempo-datasource
-  namespace: telemetry-system
+  namespace: grafana-system
   labels:
     dashboards: "grafana"
 spec:
@@ -13,7 +13,7 @@ spec:
     name: Tempo
     type: tempo
     access: proxy
-    url: http://telemetry-system-tempo.telemetry-system.svc.cluster.local:3100
+    url: http://tempo-system-tempo.tempo-system.svc.cluster.local:3100
     uid: tempo-datasource
     isDefault: false
     editable: true
