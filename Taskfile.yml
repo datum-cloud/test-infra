@@ -450,8 +450,8 @@ tasks:
       - echo "⏳ Waiting for Victoria Metrics Stack HelmRelease …"
       - kubectl -n flux-system wait helmrelease/vm --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "⏳ Waiting for vmagent & vmsingle to be Ready …"
-      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n telemetry-system --timeout={{.WAIT_TIMEOUT}} || true
-      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout={{.WAIT_TIMEOUT}} || true
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmagent -n victoria-metrics-system --timeout={{.WAIT_TIMEOUT}} || true
+      - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n victoria-metrics-system --timeout={{.WAIT_TIMEOUT}} || true
       - echo "✅ Victoria Metrics is ready"
 
   install-otel-collector:
@@ -480,7 +480,7 @@ tasks:
           sleep 10
         done
       - echo "⏳ Waiting for OTel Collector DaemonSet …"
-      - kubectl -n telemetry-system rollout status daemonset/otel-collector-collector --timeout={{.WAIT_TIMEOUT}}
+      - kubectl -n otel-collector-system rollout status daemonset/otel-collector-collector --timeout={{.WAIT_TIMEOUT}}
       - echo "✅ OpenTelemetry Collector is ready"
 
   install-grafana:

@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  targetNamespace: telemetry-system
+  targetNamespace: otel-collector-system
   chart:
     spec:
       chart: opentelemetry-operator

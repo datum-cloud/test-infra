@@ -6,7 +6,7 @@ metadata:
 spec:
   interval: 15m
   timeout: 5m
-  targetNamespace: telemetry-system
+  targetNamespace: grafana-system
   chart:
     spec:
       chart: grafana-operator
