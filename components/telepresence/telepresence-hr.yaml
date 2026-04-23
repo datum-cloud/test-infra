@@ -1,0 +1,38 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traffic-manager
+  namespace: ambassador
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: telepresence
+      version: "2.x"
+      sourceRef:
+        kind: HelmRepository
+        name: datawire
+        namespace: ambassador
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    # Traffic Manager configuration
+    image:
+      registry: docker.io/datawire
+      name: tel2
+    logLevel: info
+    # RBAC settings
+    rbac:
+      create: true
+    # Allow intercepting services
+    intercept:
+      disableGlobal: false
+    # Agent injector settings
+    agentInjector:
+      enabled: true
