@@ -392,6 +392,8 @@ tasks:
     desc: "Deploy Envoy Gateway Operator via Kustomize, then wait"
     silent: true
     cmds:
+      - echo "➡️  Installing Gateway API CRDs v1.5.1 (experimental, required by EG v1.8.1) …"
+      - kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator/gateway-api-crds | kubectl apply --server-side --force-conflicts -f -
       - echo "➡️  Reconciling Envoy Gateway Operator …"
       - kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator | kubectl apply -f -
       - echo "⏳ Waiting for Envoy Gateway Operator HelmRelease …"
