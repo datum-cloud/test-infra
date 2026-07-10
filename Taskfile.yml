@@ -30,6 +30,45 @@ vars:
   # All file paths relative to REPO_DIR
   KIND_CFG: '{{.REPO_DIR}}/cluster/kind-config.yaml'
 
+  #----------------------------------------------------------------------------
+  # Federation topology (Karmada hub + members). Only the federation-* tasks use
+  # these; single-cluster consumers are unaffected. Requires Task >= 3.44 (for:
+  # over task: calls). See README "Federation topology".
+  #----------------------------------------------------------------------------
+  # Kind cluster hosting the Karmada control plane (the federation hub). Literal
+  # name — no prefixing rules are applied anywhere.
+  FEDERATION_HUB_CLUSTER: '{{.FEDERATION_HUB_CLUSTER | default "federation-hub"}}'
+  # Space-separated `<kind-cluster-name>[=<label-value>]` member entries, e.g.
+  # "compute-pop-dfw=dfw compute-pop-ord=ord". A member's Karmada cluster name is
+  # its kind cluster name; the `=label` is optional (omitted ⇒ no label applied).
+  # Names must not contain `=`, and the name `karmada` is reserved (it would
+  # collide with a kubeconfig filename). No default — federation tasks
+  # precondition on it being non-empty.
+  FEDERATION_MEMBERS: '{{.FEDERATION_MEMBERS | default ""}}'
+  # Label key applied to each member, carrying that member's label value
+  # (Datum-wide topology convention, parameterized so other consumers can relabel).
+  FEDERATION_MEMBER_LABEL_KEY: '{{.FEDERATION_MEMBER_LABEL_KEY | default "topology.datum.net/city-code"}}'
+  # Karmada Helm chart version, and the matching karmadactl CLI. One knob drives
+  # both, each separately overridable.
+  KARMADA_VERSION: '{{.KARMADA_VERSION | default "v1.16.0"}}'
+  KARMADACTL_VERSION: '{{.KARMADACTL_VERSION | default .KARMADA_VERSION}}'
+  # NodePort + host port for the Karmada apiserver (quoted; envsubst-rendered into
+  # the hub kind config and passed to helm --set apiServer.nodePort).
+  KARMADA_API_NODEPORT: '{{.KARMADA_API_NODEPORT | default "32443"}}'
+  # Longer timeout for Karmada install/converge waits; WAIT_TIMEOUT (300s) still
+  # covers the shorter waits such as member Ready.
+  KARMADA_WAIT_TIMEOUT: '{{.KARMADA_WAIT_TIMEOUT | default "10m"}}'
+  # All federation kubeconfigs land here (.test-infra/kubeconfigs/federation/ for
+  # external consumers).
+  FEDERATION_KUBECONFIG_DIR: '{{.FEDERATION_KUBECONFIG_DIR | default (printf "%s/kubeconfigs/federation" .REPO_DIR)}}'
+  # Federation kind config templates (overridable, mirroring KIND_CFG).
+  FEDERATION_HUB_KIND_CFG: '{{.FEDERATION_HUB_KIND_CFG | default (printf "%s/cluster/federation/kind-hub.yaml" .REPO_DIR)}}'
+  FEDERATION_MEMBER_KIND_CFG: '{{.FEDERATION_MEMBER_KIND_CFG | default (printf "%s/cluster/federation/kind-member.yaml" .REPO_DIR)}}'
+  # karmadactl is version-pinned per-repo, so it goes to a repo-local bin (not
+  # /usr/local/bin) like other pinned tools.
+  LOCALBIN: '{{.LOCALBIN | default (printf "%s/bin" .REPO_DIR)}}'
+  KARMADACTL: '{{.KARMADACTL | default (printf "%s/karmadactl" .LOCALBIN)}}'
+
 env:
   KIND_VERSION: '{{.KIND_VERSION}}'
   KUBECONFIG: '{{.KUBECONFIG_FILE}}'
@@ -113,6 +152,12 @@ tasks:
       - echo "  kind-load-image         Load images into KIND"
       - echo "  kind-save-image         Save image tarball artifact"
       - echo ""
+      - echo "🌐 Federation topology (Karmada hub + members):"
+      - echo "  federation-up           Stand up hub + members + join (needs FEDERATION_MEMBERS)"
+      - echo "  federation-down         Delete the federation clusters + kubeconfigs"
+      - echo "  federation-status       Show hub + member health"
+      - echo "  federation-load-image   Load images into hub + all members"
+      - echo ""
       - 'echo "For detailed help: task --list"'
       - 'echo "To run a command: task <command-name>"'
 
@@ -143,7 +188,7 @@ tasks:
       - echo "🎉 Test infrastructure deployment complete!"
       - echo ""
       - echo "🌐 Available endpoints:"
-      - 'echo "   • HTTPS Gateway: https://localhost:8443"'
+      - 'echo "   • HTTPS Gateway: https://localhost:30443"'
       - 'echo "   • Grafana:       http://localhost:30000 (after installing observability)"'
       - echo ""
       - echo "📦 Optional add-ons:"
@@ -153,7 +198,7 @@ tasks:
       - echo "   • export KUBECONFIG={{.KUBECONFIG_FILE}}"  # Connect to test-infra cluster
       - echo "   • task cluster-status"                # Check cluster health
       - echo "   • kubectl get pods --all-namespaces"  # List all pods
-      - echo "   • curl -k https://localhost:8443"     # Test gateway
+      - echo "   • curl -k https://localhost:30443"    # Test gateway
       - echo "   • task help"                          # See all commands
 
   cluster-down:
@@ -265,17 +310,39 @@ tasks:
     desc: "Create KIND cluster"
     silent: true
     cmds:
+      # Public create-kind keeps its exact single-cluster behavior: create the
+      # cluster with the repo defaults, then install Flux. The cluster-creation
+      # body now lives in the parameterized create-kind-raw so the federation
+      # tasks can reuse it WITHOUT Flux (federation clusters run no Flux).
+      - task: create-kind-raw
+        vars:
+          CLUSTER_NAME: '{{.CLUSTER_NAME}}'
+          KIND_CFG: '{{.KIND_CFG}}'
+          KUBECONFIG_FILE: '{{.KUBECONFIG_FILE}}'
+      # Always install flux to the cluster so additional components can be
+      # installed using it.
+      - task: install-flux
+
+  create-kind-raw:
+    internal: true
+    desc: "Create a KIND cluster from an explicit config + kubeconfig (no Flux)"
+    silent: true
+    cmds:
       - echo "➡️  Creating KIND cluster '{{.CLUSTER_NAME}}' ..."
       - |
         # Check if cluster already exists
         if kind get clusters | grep -q "^{{.CLUSTER_NAME}}$"; then
           echo "✅ KIND cluster '{{.CLUSTER_NAME}}' already exists"
-          # Validate cluster is accessible
-          if kubectl cluster-info >/dev/null 2>&1; then
+          # Validate cluster is accessible. Explicit --kubeconfig on every kubectl:
+          # federation clusters do not use the global KUBECONFIG env (that points
+          # at the single-cluster file), so each call targets this cluster's own
+          # kubeconfig. For the public single-cluster path KUBECONFIG_FILE is that
+          # same global file, so the behavior is unchanged.
+          if kubectl --kubeconfig {{.KUBECONFIG_FILE}} cluster-info >/dev/null 2>&1; then
             echo "✅ Cluster is accessible and ready"
           else
             echo "⚠️  Cluster exists but is not accessible - checking..."
-            kubectl cluster-info 2>&1 || echo "❌ Cluster may need to be recreated"
+            kubectl --kubeconfig {{.KUBECONFIG_FILE}} cluster-info 2>&1 || echo "❌ Cluster may need to be recreated"
           fi
         else
           echo "🚀 Creating new KIND cluster..."
@@ -285,19 +352,22 @@ tasks:
             exit 1
           fi
 
-          # Export REPO_DIR for envsubst to substitute audit policy path in KIND config
-          # KIND doesn't natively support env var substitution, so we preprocess with envsubst
+          # KIND doesn't natively support env var substitution, so we preprocess
+          # with envsubst. REPO_DIR resolves the audit-policy path in the
+          # single-cluster config; KARMADA_API_NODEPORT resolves the hub config's
+          # NodePort port mappings (a harmless no-op for configs without them).
           export REPO_DIR="{{.REPO_DIR}}"
+          export KARMADA_API_NODEPORT="{{.KARMADA_API_NODEPORT}}"
 
           # Process KIND config and create cluster (--name and --image override config values)
           if envsubst < {{.KIND_CFG}} | kind create cluster --name {{.CLUSTER_NAME}} --image kindest/node:{{.K8S_VERSION}} --config - --kubeconfig {{.KUBECONFIG_FILE}}; then
             echo "✅ KIND cluster created successfully"
-            echo "📝 Test-infra cluster kubeconfig written to: {{.KUBECONFIG_FILE}}"
+            echo "📝 Cluster kubeconfig written to: {{.KUBECONFIG_FILE}}"
 
             # Wait for cluster to be ready
             echo "⏳ Waiting for cluster to be ready..."
             timeout_count=0
-            while ! kubectl cluster-info >/dev/null 2>&1; do
+            while ! kubectl --kubeconfig {{.KUBECONFIG_FILE}} cluster-info >/dev/null 2>&1; do
               if [ $timeout_count -ge 30 ]; then
                 echo "❌ Timeout waiting for cluster to be ready"
                 exit 1
@@ -313,9 +383,6 @@ tasks:
             exit 1
           fi
         fi
-      # Always install flux to the cluster so additional components can be
-      # installed using it.
-      - task: install-flux
 
   delete-kind:
     desc: "Delete KIND cluster"
@@ -403,7 +470,7 @@ tasks:
       - echo "✅ Envoy Gateway Operator and merged gateway are ready"
       - echo ""
       - echo "🌐 Gateway exposed ports:"
-      - 'echo "   HTTPS Gateway: https://localhost:8443 (self-signed cert - use -k flag)"'
+      - 'echo "   HTTPS Gateway: https://localhost:30443 (self-signed cert - use -k flag)"'
       - echo "   To find the actual NodePort assignments, run:"
       - echo "   kubectl get svc -n envoy-gateway-system -l app.kubernetes.io/name=envoy"
 
@@ -493,3 +560,454 @@ tasks:
         msg: 'ERROR: set TAR=<file> as argument'
     cmds:
       - docker save "{{.IMAGE}}" | gzip > "{{.TAR}}"
+
+  #------------------------------------------------------------------------------
+  # Federation topology (Karmada hub + members)
+  #
+  # Stands up a Karmada hub kind cluster plus N member kind clusters, joins the
+  # members, and writes a kubeconfig bundle any Datum service e2e can consume
+  # (compute is the first consumer; NSO-style labs the next). Karmada is installed
+  # imperatively via Helm here rather than through Flux — federation clusters run
+  # no Flux, matching the kyverno-style direct install. Requires Task >= 3.44.
+  #
+  # Every kubectl/helm/karmadactl call passes an explicit --kubeconfig: the global
+  # KUBECONFIG env points at the single-cluster file and must never be relied on
+  # in these tasks. docker-IP derivation lives only in hack/federation/*.sh — a
+  # docker --format Go-template would collide with Task's own {{ }} templating.
+  #------------------------------------------------------------------------------
+  federation-up:
+    desc: "Stand up the Karmada hub + members and join them (idempotent)"
+    silent: true
+    preconditions:
+      - sh: '[ -n "{{.FEDERATION_MEMBERS}}" ]'
+        msg: |
+          ERROR: set FEDERATION_MEMBERS="<name>[=<label>] ..." (space-separated).
+          Example: FEDERATION_MEMBERS="compute-pop-dfw=dfw compute-pop-ord=ord"
+    cmds:
+      - task: ensure-repo
+      - task: federation-ensure-tools
+      - task: federation-create-clusters
+      - task: federation-install-karmada
+      - task: federation-join-members
+      - task: federation-write-env
+      - echo ""
+      - echo "🎉 Federation topology ready"
+      - echo ""
+      - 'echo "📝 Kubeconfigs ({{.FEDERATION_KUBECONFIG_DIR}}):"'
+      - 'echo "   • hub:            {{.FEDERATION_HUB_CLUSTER}}.yaml"'
+      - 'echo "   • Karmada API:    karmada.yaml (localhost:{{.KARMADA_API_NODEPORT}})"'
+      - 'echo "   • Karmada API:    karmada-internal.yaml (docker-bridge)"'
+      - 'echo "   • members:        <name>.yaml + <name>-internal.yaml"'
+      - 'echo "   • facts:          federation.env"'
+      - echo ""
+      - 'echo "🔍 Inspect: kubectl --kubeconfig {{.FEDERATION_KUBECONFIG_DIR}}/karmada.yaml get clusters"'
+
+  federation-down:
+    desc: "Delete the federation hub + members and remove their kubeconfigs"
+    silent: true
+    cmds:
+      - echo "🗑️  Deleting federation clusters..."
+      - |
+        # Tolerant teardown (like delete-kind): delete the hub and every member,
+        # ignoring clusters that are already gone. Unquoted expansion word-splits
+        # FEDERATION_MEMBERS on spaces (skipping empties) and strips each label.
+        for c in {{.FEDERATION_HUB_CLUSTER}} $(for m in {{.FEDERATION_MEMBERS}}; do echo "${m%%=*}"; done); do
+          [ -z "$c" ] && continue
+          if kind get clusters 2>/dev/null | grep -qx "$c"; then
+            echo "🗑️  Deleting '$c'..."
+            kind delete cluster --name "$c" || echo "⚠️  Error deleting '$c', continuing..."
+          else
+            echo "ℹ️  Cluster '$c' does not exist"
+          fi
+        done
+      - rm -rf {{.FEDERATION_KUBECONFIG_DIR}}
+      - echo "✅ Federation torn down"
+
+  federation-status:
+    desc: "Show federation hub + member health"
+    silent: true
+    cmds:
+      - echo "🔍 Federation Status"
+      - echo ""
+      - |
+        if kind get clusters 2>/dev/null | grep -qx "{{.FEDERATION_HUB_CLUSTER}}"; then
+          echo "✅ Hub cluster '{{.FEDERATION_HUB_CLUSTER}}' exists"
+        else
+          echo "❌ Hub cluster '{{.FEDERATION_HUB_CLUSTER}}' does not exist"
+          exit 0
+        fi
+      - |
+        HUB={{.FEDERATION_KUBECONFIG_DIR}}/{{.FEDERATION_HUB_CLUSTER}}.yaml
+        echo ""
+        echo "📦 Karmada control plane (karmada-system):"
+        if [ -f "$HUB" ]; then
+          kubectl --kubeconfig "$HUB" -n karmada-system get deploy \
+            -o custom-columns=NAME:.metadata.name,AVAILABLE:.status.availableReplicas,DESIRED:.spec.replicas 2>/dev/null \
+            || echo "   ❌ Cannot read karmada-system deployments"
+        else
+          echo "   ❌ Hub kubeconfig not found at $HUB"
+        fi
+      - |
+        KARMADA={{.FEDERATION_KUBECONFIG_DIR}}/karmada.yaml
+        echo ""
+        echo "🌐 Registered clusters:"
+        if [ -f "$KARMADA" ]; then
+          kubectl --kubeconfig "$KARMADA" get clusters 2>/dev/null \
+            || echo "   ❌ Cannot reach the Karmada API server"
+        else
+          echo "   ❌ Karmada kubeconfig not found at $KARMADA"
+        fi
+      - echo ""
+      - 'echo "📝 Kubeconfig dir: {{.FEDERATION_KUBECONFIG_DIR}}"'
+
+  federation-load-image:
+    desc: "Load one or more images into the federation hub + all members"
+    silent: true
+    vars:
+      IMAGES: '{{.IMAGES}}'
+    preconditions:
+      - sh: '[ -n "{{.IMAGES}}" ]'
+        msg: 'ERROR: pass IMAGES="img1 img2 ..." as argument'
+    cmds:
+      - |
+        for c in {{.FEDERATION_HUB_CLUSTER}} $(for m in {{.FEDERATION_MEMBERS}}; do echo "${m%%=*}"; done); do
+          [ -z "$c" ] && continue
+          for img in {{.IMAGES}}; do
+            echo "➡️  Loading $img into kind '$c'"
+            docker pull "$img" || true
+            kind load docker-image "$img" --name "$c"
+          done
+        done
+
+  #------------------------------------------------------------------------------
+  # Federation internals
+  #------------------------------------------------------------------------------
+  federation-ensure-tools:
+    internal: true
+    silent: true
+    cmds:
+      # kind/kubectl/helm come from the shared installer; karmadactl is
+      # version-pinned per-repo so it lives in a repo-local bin.
+      - bash {{.REPO_DIR}}/hack/ensure-tools.sh kind kubectl helm
+      - task: federation-ensure-karmadactl
+
+  federation-ensure-karmadactl:
+    internal: true
+    silent: true
+    status:
+      - test -f {{.KARMADACTL}}
+    cmds:
+      - mkdir -p {{.LOCALBIN}}
+      - |
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        URL="https://github.com/karmada-io/karmada/releases/download/{{.KARMADACTL_VERSION}}/karmadactl-${OS}-${ARCH}.tgz"
+        echo "Downloading karmadactl {{.KARMADACTL_VERSION}} (${OS}/${ARCH})..."
+        curl -sSfL "${URL}" | tar -xz -C {{.LOCALBIN}} karmadactl
+        chmod +x {{.KARMADACTL}}
+        echo "karmadactl installed → {{.KARMADACTL}}"
+
+  federation-create-clusters:
+    internal: true
+    silent: true
+    cmds:
+      - mkdir -p {{.FEDERATION_KUBECONFIG_DIR}}
+      # Hub — needs the extraPortMappings for the Karmada API NodePort.
+      - task: create-kind-raw
+        vars:
+          CLUSTER_NAME: '{{.FEDERATION_HUB_CLUSTER}}'
+          KIND_CFG: '{{.FEDERATION_HUB_KIND_CFG}}'
+          KUBECONFIG_FILE: '{{.FEDERATION_KUBECONFIG_DIR}}/{{.FEDERATION_HUB_CLUSTER}}.yaml'
+      # Re-export the hub kubeconfig so an idempotent re-run (cluster already
+      # present, kubeconfig dir cleaned) still has a usable file.
+      - kind export kubeconfig --name {{.FEDERATION_HUB_CLUSTER}} --kubeconfig {{.FEDERATION_KUBECONFIG_DIR}}/{{.FEDERATION_HUB_CLUSTER}}.yaml
+      # Members — same busy-host tuning, no port mapping.
+      - for: { var: FEDERATION_MEMBERS, split: ' ' }
+        task: federation-create-member
+        vars:
+          MEMBER_SPEC: '{{.ITEM}}'
+
+  federation-create-member:
+    internal: true
+    silent: true
+    vars:
+      MEMBER_NAME: '{{splitList "=" .MEMBER_SPEC | first}}'
+    # Skip empty entries produced by trailing/double spaces in FEDERATION_MEMBERS
+    # (Task's for/split does not drop empty fields).
+    status:
+      - test -z "{{.MEMBER_NAME}}"
+    cmds:
+      - task: create-kind-raw
+        vars:
+          CLUSTER_NAME: '{{.MEMBER_NAME}}'
+          KIND_CFG: '{{.FEDERATION_MEMBER_KIND_CFG}}'
+          KUBECONFIG_FILE: '{{.FEDERATION_KUBECONFIG_DIR}}/{{.MEMBER_NAME}}.yaml'
+      - kind export kubeconfig --name {{.MEMBER_NAME}} --kubeconfig {{.FEDERATION_KUBECONFIG_DIR}}/{{.MEMBER_NAME}}.yaml
+      # Docker-bridge-IP variant stored in Karmada so the controller (inside
+      # Docker) can reach this member's API server across the kind network.
+      - bash {{.REPO_DIR}}/hack/federation/make-internal-kubeconfig.sh {{.FEDERATION_KUBECONFIG_DIR}}/{{.MEMBER_NAME}}.yaml {{.FEDERATION_KUBECONFIG_DIR}}/{{.MEMBER_NAME}}-internal.yaml {{.MEMBER_NAME}}
+
+  federation-install-karmada:
+    internal: true
+    silent: true
+    vars:
+      HUB_KUBECONFIG: '{{.FEDERATION_KUBECONFIG_DIR}}/{{.FEDERATION_HUB_CLUSTER}}.yaml'
+    cmds:
+      # Idempotency keys on the karmada-apiserver Deployment existing rather than
+      # just the namespace: a Helm --wait that times out on a loaded machine
+      # leaves the namespace behind with components still converging, and we want a
+      # re-run to resume that install (wait for it to finish) instead of skipping
+      # past a not-yet-ready control plane. --repo installs the chart without
+      # mutating the developer's global helm repo list; static values live in
+      # components/karmada/values.yaml, the NodePort is set on the command line so
+      # it shares one source of truth with the hub kind config.
+      - |
+        if kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+            -n karmada-system get deploy karmada-apiserver &>/dev/null; then
+          echo "Karmada already present — waiting for its components to become Available..."
+        else
+          echo "Installing Karmada {{.KARMADA_VERSION}} via Helm..."
+          helm install karmada karmada \
+            --repo https://raw.githubusercontent.com/karmada-io/karmada/master/charts \
+            --version {{.KARMADA_VERSION}} \
+            -f {{.REPO_DIR}}/components/karmada/values.yaml \
+            --set apiServer.nodePort={{.KARMADA_API_NODEPORT}} \
+            --kubeconfig={{.HUB_KUBECONFIG}} \
+            --namespace karmada-system \
+            --create-namespace \
+            --wait \
+            --timeout {{.KARMADA_WAIT_TIMEOUT}} \
+            || echo "Helm --wait did not settle in time; will wait on the deployments directly below"
+        fi
+      # Tune BEFORE the Available wait: the probe relaxation + etcd fsync + leader
+      # election patches are what let the components actually become Available on a
+      # loaded host, so they must land before we block on the wait.
+      - task: federation-tune-karmada
+      # Scale any Karmada deployment sitting at zero back up to one. Makes the
+      # target robust to a control plane intentionally scaled down (to keep a busy
+      # host calm between runs) or left at zero by a partial install: otherwise the
+      # Available wait below blocks forever on a deployment with no desired replicas.
+      - |
+        for d in $(kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+            -n karmada-system get deploy -o jsonpath='{.items[*].metadata.name}'); do
+          reps=$(kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+            -n karmada-system get deploy "$d" -o jsonpath='{.spec.replicas}')
+          if [ "$reps" = "0" ]; then
+            echo "Scaling Karmada deploy $d back to 1 (was scaled to 0)..."
+            kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+              -n karmada-system scale deploy "$d" --replicas=1
+          fi
+        done
+      # Wait on the control-plane deployments regardless of how the install above
+      # exited, so a timed-out Helm run still converges before we build the
+      # kubeconfig and register members.
+      - |
+        kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+          -n karmada-system wait --for=condition=Available deploy --all --timeout={{.KARMADA_WAIT_TIMEOUT}}
+        echo "Karmada control plane is Available"
+      - task: federation-build-kubeconfig
+
+  federation-tune-karmada:
+    internal: true
+    silent: true
+    vars:
+      HUB_KUBECONFIG: '{{.FEDERATION_KUBECONFIG_DIR}}/{{.FEDERATION_HUB_CLUSTER}}.yaml'
+    cmds:
+      # Disable leader election on the single-replica Karmada controllers. On a
+      # busy host, etcd write-latency spikes make the controllers' 5s lease
+      # renewals time out; each lost lease exits the process, and the restart
+      # re-lists every resource, adding I/O load that provokes the next spike — a
+      # crashloop feedback loop. With one replica there is nothing to elect, so
+      # turning it off breaks the loop. Harmless in single-replica e2e; not for HA.
+      - |
+        for d in karmada-controller-manager karmada-kube-controller-manager karmada-scheduler; do
+          current=$(kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+            -n karmada-system get deploy "$d" \
+            -o jsonpath='{.spec.template.spec.containers[0].command}' 2>/dev/null)
+          if echo "$current" | grep -q -- "--leader-elect=false"; then
+            echo "Leader election already disabled on $d"
+          else
+            echo "Disabling leader election on $d..."
+            kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+              -n karmada-system patch deploy "$d" --type=json \
+              -p '[{"op":"add","path":"/spec/template/spec/containers/0/command/-","value":"--leader-elect=false"}]'
+          fi
+        done
+      # Disable fsync on the Karmada control plane's own etcd, same throwaway-data
+      # reason as the base clusters (see cluster/federation/kind-*.yaml). Its etcd
+      # is a Helm-managed StatefulSet on hostPath storage — co-located with the
+      # hub's own etcd on one node — so without this its fsync contention keeps hub
+      # writes slow even after the base etcds are tuned. Idempotent: only patch +
+      # restart if the flag is not already set. Data lives on a hostPath, so
+      # deleting the pod does not lose state (a StatefulSet does not always roll on
+      # a bare command change, hence the explicit delete).
+      - |
+        current=$(kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+          -n karmada-system get statefulset etcd \
+          -o jsonpath='{.spec.template.spec.containers[0].command}' 2>/dev/null)
+        if echo "$current" | grep -q -- "--unsafe-no-fsync"; then
+          echo "Karmada etcd fsync already disabled"
+        else
+          echo "Disabling fsync on the Karmada etcd..."
+          kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+            -n karmada-system patch statefulset etcd --type=json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/command/-","value":"--unsafe-no-fsync=true"}]'
+          kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+            -n karmada-system delete pod etcd-0 --ignore-not-found
+        fi
+      # Relax the Karmada API server's health probes. Under sustained load a
+      # transient etcd/DNS blip makes the default 5s/15s probes fail, and the
+      # kubelet SIGKILLs the API server — cascading into a crashloop. Wider
+      # thresholds let it ride out the blip instead of being killed.
+      - |
+        kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+          -n karmada-system patch deploy karmada-apiserver --type=strategic \
+          -p '{"spec":{"template":{"spec":{"containers":[{"name":"karmada-apiserver","livenessProbe":{"timeoutSeconds":30,"failureThreshold":30,"periodSeconds":30,"initialDelaySeconds":60},"readinessProbe":{"timeoutSeconds":30,"failureThreshold":30,"periodSeconds":20}}]}}}}'
+
+  federation-build-kubeconfig:
+    internal: true
+    silent: true
+    vars:
+      HUB_KUBECONFIG: '{{.FEDERATION_KUBECONFIG_DIR}}/{{.FEDERATION_HUB_CLUSTER}}.yaml'
+      KARMADA_KUBECONFIG: '{{.FEDERATION_KUBECONFIG_DIR}}/karmada.yaml'
+    cmds:
+      - |
+        echo "Building Karmada kubeconfig → {{.KARMADA_KUBECONFIG}}"
+        # Extract the raw kubeconfig from the secret the Helm chart creates.
+        kubectl --kubeconfig={{.HUB_KUBECONFIG}} \
+          get secret karmada-kubeconfig -n karmada-system \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{.KARMADA_KUBECONFIG}}
+        # Rewrite the server to the NodePort exposed on localhost. The served cert
+        # is for the internal cluster IP, so drop the CA and skip TLS (local dev
+        # only). The CA must be unset BEFORE enabling insecure — kubectl rejects a
+        # config carrying both. Single-brace jsonpath is safe inline in the Taskfile.
+        ENTRY=$(kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} config view -o jsonpath='{.clusters[0].name}')
+        kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} config unset "clusters.${ENTRY}.certificate-authority-data" >/dev/null
+        kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} config set-cluster "${ENTRY}" \
+          --server=https://127.0.0.1:{{.KARMADA_API_NODEPORT}} \
+          --insecure-skip-tls-verify=true >/dev/null
+        echo "  karmada server → https://127.0.0.1:{{.KARMADA_API_NODEPORT}}"
+      # Docker-bridge variant of the SAME identity for in-network reachers (e.g. a
+      # cell operator in another kind cluster): server = hub docker IP:NodePort.
+      - bash {{.REPO_DIR}}/hack/federation/make-internal-kubeconfig.sh {{.KARMADA_KUBECONFIG}} {{.FEDERATION_KUBECONFIG_DIR}}/karmada-internal.yaml {{.FEDERATION_HUB_CLUSTER}} {{.KARMADA_API_NODEPORT}}
+
+  federation-join-members:
+    internal: true
+    silent: true
+    vars:
+      KARMADA_KUBECONFIG: '{{.FEDERATION_KUBECONFIG_DIR}}/karmada.yaml'
+    cmds:
+      # cluster.karmada.io is served by the karmada-aggregated-apiserver through
+      # API aggregation, and can briefly return ServiceUnavailable after the pod
+      # reports Ready while the aggregation handshake settles. Wait for the API to
+      # actually answer before registering members so join does not race it.
+      - |
+        echo "Waiting for the cluster.karmada.io aggregated API to be served..."
+        deadline=$((SECONDS+180))
+        until kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} get clusters &>/dev/null; do
+          if [ $SECONDS -ge $deadline ]; then
+            echo "ERROR: cluster.karmada.io was not served within 180s"; exit 1
+          fi
+          sleep 3
+        done
+        echo "cluster.karmada.io is served"
+      - for: { var: FEDERATION_MEMBERS, split: ' ' }
+        task: federation-join-member
+        vars:
+          MEMBER_SPEC: '{{.ITEM}}'
+      # "done" means every member has reached Ready.
+      - |
+        for m in {{.FEDERATION_MEMBERS}}; do
+          name="${m%%=*}"
+          [ -z "$name" ] && continue
+          echo "Waiting for cluster/$name to become Ready..."
+          kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} wait --for=condition=Ready \
+            cluster/"$name" --timeout={{.WAIT_TIMEOUT}}
+        done
+        echo "All members Ready"
+
+  federation-join-member:
+    internal: true
+    silent: true
+    vars:
+      MEMBER_NAME: '{{splitList "=" .MEMBER_SPEC | first}}'
+      KARMADA_KUBECONFIG: '{{.FEDERATION_KUBECONFIG_DIR}}/karmada.yaml'
+    # Skip empty entries produced by trailing/double spaces in FEDERATION_MEMBERS.
+    status:
+      - test -z "{{.MEMBER_NAME}}"
+    cmds:
+      # ── Register with karmadactl join ──────────────────────────────────
+      # Pass the EXTERNAL kubeconfig (localhost-based) so karmadactl can reach the
+      # member from this host to set up initial RBAC; the stored secret is patched
+      # below to the Docker-IP variant. karmadactl join creates an impersonation
+      # ServiceAccount in the member and blocks (non-tunable internal timeout) on
+      # that SA's legacy token Secret being populated. On a busy host the member's
+      # token controller is slow, so the first join can time out even though the
+      # Secret populates moments later — retry, a later attempt reuses it and
+      # completes immediately.
+      - |
+        if kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} \
+            get cluster {{.MEMBER_NAME}} &>/dev/null; then
+          echo "Cluster '{{.MEMBER_NAME}}' already registered in Karmada — skipping join"
+        else
+          echo "Joining '{{.MEMBER_NAME}}' to Karmada..."
+          joined=false
+          for attempt in 1 2 3 4 5; do
+            if {{.KARMADACTL}} join {{.MEMBER_NAME}} \
+                --kubeconfig={{.KARMADA_KUBECONFIG}} \
+                --cluster-kubeconfig={{.FEDERATION_KUBECONFIG_DIR}}/{{.MEMBER_NAME}}.yaml \
+                --cluster-context=kind-{{.MEMBER_NAME}}; then
+              joined=true
+              echo "Cluster '{{.MEMBER_NAME}}' registered (attempt ${attempt})"
+              break
+            fi
+            echo "join attempt ${attempt} failed (member token Secret may still be populating); retrying in 10s..."
+            sleep 10
+          done
+          if [ "${joined}" != "true" ]; then
+            echo "ERROR: failed to join '{{.MEMBER_NAME}}' after 5 attempts"; exit 1
+          fi
+        fi
+      # ── Patch cluster secret + apiEndpoint → Docker-IP kubeconfig ───────
+      # The Karmada controller manager runs inside Docker; it cannot use localhost
+      # to reach the member API server. Point the stored secret and the Cluster's
+      # apiEndpoint at the kind container's docker-bridge IP (the member never goes
+      # Ready otherwise — health checks keep probing the localhost address).
+      - bash {{.REPO_DIR}}/hack/federation/patch-cluster-secret.sh {{.KARMADA_KUBECONFIG}} {{.MEMBER_NAME}} {{.FEDERATION_KUBECONFIG_DIR}}/{{.MEMBER_NAME}}-internal.yaml
+      # ── Apply the topology label when the member spec carries one ───────
+      - |
+        SPEC='{{.MEMBER_SPEC}}'
+        case "$SPEC" in
+          *=*)
+            LABEL_VALUE="${SPEC#*=}"
+            echo "Labeling cluster '{{.MEMBER_NAME}}' {{.FEDERATION_MEMBER_LABEL_KEY}}=${LABEL_VALUE}"
+            kubectl --kubeconfig={{.KARMADA_KUBECONFIG}} label cluster {{.MEMBER_NAME}} \
+              {{.FEDERATION_MEMBER_LABEL_KEY}}="${LABEL_VALUE}" --overwrite
+            ;;
+          *)
+            echo "No label for cluster '{{.MEMBER_NAME}}' (spec has no '=<label>')"
+            ;;
+        esac
+
+  federation-write-env:
+    internal: true
+    silent: true
+    cmds:
+      # Shell-sourceable facts for consumers (e.g. a cell operator that needs the
+      # hub docker IP without re-deriving it). We read the hub docker IP back from
+      # karmada-internal.yaml's server rather than re-running docker inspect — the
+      # IP was already derived there, and that keeps the docker Go-template out of
+      # the Taskfile.
+      - |
+        HUB_SERVER=$(kubectl --kubeconfig={{.FEDERATION_KUBECONFIG_DIR}}/karmada-internal.yaml \
+          config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+        # server is https://<hub-docker-ip>:<nodeport>; strip scheme and port.
+        HUB_IP=${HUB_SERVER#https://}
+        HUB_IP=${HUB_IP%:*}
+        cat > {{.FEDERATION_KUBECONFIG_DIR}}/federation.env <<EOF
+        FEDERATION_HUB_CLUSTER={{.FEDERATION_HUB_CLUSTER}}
+        FEDERATION_HUB_DOCKER_IP=${HUB_IP}
+        KARMADA_API_NODEPORT={{.KARMADA_API_NODEPORT}}
+        FEDERATION_MEMBERS="{{.FEDERATION_MEMBERS}}"
+        EOF
+        echo "Wrote {{.FEDERATION_KUBECONFIG_DIR}}/federation.env (hub docker IP ${HUB_IP})"
