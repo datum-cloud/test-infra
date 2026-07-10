@@ -86,14 +86,21 @@ runs:
       run: |
         # Newlines in the members input are tolerated: fold them to spaces.
         MEMBERS=$(printf '%s' "${{ inputs.members }}" | tr '\n' ' ')
+        # Only pass KARMADA_VERSION when set: Task treats a CLI-provided empty
+        # value as authoritative and skips the Taskfile's `| default`, so passing
+        # an empty string here would zero out the chart + karmadactl versions.
+        VERSION_ARG=()
+        if [ -n "${{ inputs.karmada_version }}" ]; then
+          VERSION_ARG=(KARMADA_VERSION="${{ inputs.karmada_version }}")
+        fi
         task federation-up \
           FEDERATION_HUB_CLUSTER="${{ inputs.hub_cluster }}" \
           FEDERATION_MEMBERS="$MEMBERS" \
           FEDERATION_MEMBER_LABEL_KEY="${{ inputs.member_label_key }}" \
           KARMADA_API_NODEPORT="${{ inputs.karmada_api_nodeport }}" \
-          KARMADA_VERSION="${{ inputs.karmada_version }}" \
           WAIT_TIMEOUT="${{ inputs.wait_timeout }}" \
-          KARMADA_WAIT_TIMEOUT="${{ inputs.karmada_wait_timeout }}"
+          KARMADA_WAIT_TIMEOUT="${{ inputs.karmada_wait_timeout }}" \
+          "${VERSION_ARG[@]}"
 
     - name: Load images into hub + members
       if: ${{ inputs.images != '' }}
