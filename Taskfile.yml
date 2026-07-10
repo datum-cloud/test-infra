@@ -583,6 +583,11 @@ tasks:
         msg: |
           ERROR: set FEDERATION_MEMBERS="<name>[=<label>] ..." (space-separated).
           Example: FEDERATION_MEMBERS="compute-pop-dfw=dfw compute-pop-ord=ord"
+      # The Karmada apiserver is exposed as a Service of type NodePort, so the
+      # port must be inside Kubernetes' NodePort range — otherwise the helm
+      # install fails deep inside with a cryptic Service validation error.
+      - sh: 'p={{.KARMADA_API_NODEPORT}}; [ "$p" -ge 30000 ] 2>/dev/null && [ "$p" -le 32767 ] 2>/dev/null'
+        msg: 'ERROR: KARMADA_API_NODEPORT ({{.KARMADA_API_NODEPORT}}) must be a Kubernetes NodePort in the range 30000-32767.'
     cmds:
       - task: ensure-repo
       - task: federation-ensure-tools
