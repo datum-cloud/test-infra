@@ -290,6 +290,15 @@ export TASK_X_REMOTE_TASKFILES=1
 task --yes infra:federation-up            # --yes accepts the remote-taskfile trust prompt
 ```
 
+> [!IMPORTANT]
+> A remote include shares one root variable namespace, so the foundation's root
+> vars **clobber** a consumer's same-named root vars. Do not define your own root
+> vars with names the foundation uses — `LOCALBIN`, `KARMADACTL`, and the
+> `KARMADA_*` / `FEDERATION_*` families (e.g. name a local tools dir `E2E_BIN`,
+> not `LOCALBIN`). Deliberately steering the foundation by passing those names as
+> `include.vars` (like `KARMADA_API_NODEPORT` above) is exactly how it is meant to
+> be driven and is fine.
+
 CI consumers can instead use the
 [`federation-bootstrap`](.github/actions/federation-bootstrap/action.yaml)
 composite action, which stands up the topology and emits the kubeconfig paths as
