@@ -444,8 +444,22 @@ tasks:
       - kubectl wait --for=condition=Available deploy -l app.kubernetes.io/name=vmsingle -n telemetry-system --timeout=120s || true
       - echo "⏳ Waiting for OpenTelemetryCollector CRD to be Established …"
       - kubectl wait --for=condition=Established crd/opentelemetrycollectors.opentelemetry.io --timeout={{.WAIT_TIMEOUT}}
-      - echo "➡️  Applying OpenTelemetryCollector CR …"
-      - kubectl apply -f {{.REPO_DIR}}/components/observability/otel-collector/opentelemetry-collector.yaml
+      - echo "➡️  Applying OpenTelemetryCollector CR (waiting for the operator webhook) …"
+      - |
+        set -euo pipefail
+        # HR-Ready + CRD-Established do NOT guarantee the operator's admission
+        # webhook is serving with an injected caBundle — both happen
+        # asynchronously after the Helm install. Wait for the operator
+        # Deployment, then retry the apply so a cold-start caBundle-injection
+        # lag can't fail the install with an x509 / "no endpoints" webhook error.
+        kubectl -n telemetry-system wait --for=condition=Available \
+          deploy -l app.kubernetes.io/name=opentelemetry-operator --timeout={{.WAIT_TIMEOUT}}
+        for i in $(seq 1 30); do
+          kubectl apply -f {{.REPO_DIR}}/components/observability/otel-collector/opentelemetry-collector.yaml && break
+          [ "$i" = 30 ] && { echo "OpenTelemetryCollector apply failed after retries" >&2; exit 1; }
+          echo "  operator webhook not ready yet, retrying ($i)…" >&2
+          sleep 5
+        done
       - echo "⏳ Waiting for OTel Collector DaemonSet …"
       - kubectl -n telemetry-system rollout status daemonset/otel-collector-collector --timeout={{.WAIT_TIMEOUT}}
       - echo "➡️  Applying Grafana Instance (after Operator CRDs are ready) …"
