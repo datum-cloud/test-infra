@@ -59,6 +59,15 @@ spec:
           cpu: 200m
           memory: 512Mi
 
+    # The chart enables memcached chunk/results caches by default, each
+    # requesting ~8-9Gi of memory — they stay Pending (Insufficient memory) on
+    # a single-node kind cluster, leaving the Loki HelmRelease permanently
+    # not-Ready. They add nothing for a SingleBinary + filesystem dev setup.
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
+
     # Disable all other components
     backend:
       replicas: 0

@@ -47,11 +47,16 @@ spec:
           memory: 64Mi
 
     # CA Injector configuration
+    # cainjector caches every CRD, APIService, and webhook config in the
+    # cluster to inject CA bundles, so its memory scales with cluster object
+    # count. 64Mi is enough for a bare cluster but OOMKills (exit 137) once the
+    # optional observability stack adds its CRDs/webhooks — which then blocks
+    # webhook caBundle injection (e.g. the OTel operator's), so give it room.
     cainjector:
       resources:
         requests:
           cpu: 5m
-          memory: 16Mi
+          memory: 32Mi
         limits:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 100m
+          memory: 256Mi
