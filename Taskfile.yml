@@ -142,9 +142,11 @@ tasks:
       - echo ""
       - echo "🎉 Test infrastructure deployment complete!"
       - echo ""
-      - echo "🌐 Available endpoints:"
-      - 'echo "   • HTTPS Gateway: https://localhost:8443"'
-      - 'echo "   • Grafana:       http://localhost:30000 (after installing observability)"'
+      - echo "🌐 Reaching the gateway/Grafana:"
+      - echo "   NodePorts are allocated dynamically (not bound to fixed host ports), so"
+      - echo "   multiple clusters can run concurrently on this host. Use:"
+      - echo "   • task gateway-port-forward   # forward the Envoy Gateway to localhost:8443/8080"
+      - echo "   • task grafana-port-forward   # forward Grafana to localhost:3000 (after installing observability)"
       - echo ""
       - echo "📦 Optional add-ons:"
       - echo "   • task install-observability"  # Deploy full telemetry stack
@@ -153,7 +155,7 @@ tasks:
       - echo "   • export KUBECONFIG={{.KUBECONFIG_FILE}}"  # Connect to test-infra cluster
       - echo "   • task cluster-status"                # Check cluster health
       - echo "   • kubectl get pods --all-namespaces"  # List all pods
-      - echo "   • curl -k https://localhost:8443"     # Test gateway
+      - echo "   • task gateway-port-forward           # then: curl -k https://localhost:8443"
       - echo "   • task help"                          # See all commands
 
   cluster-down:
@@ -209,6 +211,43 @@ tasks:
         echo "🚀 Launching k9s for test-infra cluster..."
         echo "📝 Using kubeconfig: {{.KUBECONFIG_FILE}}"
         k9s --kubeconfig {{.KUBECONFIG_FILE}}
+
+  gateway-port-forward:
+    desc: "Port-forward the Envoy Gateway to localhost:8443 (HTTPS) and :8080 (HTTP)"
+    silent: true
+    cmds:
+      - |
+        if [ ! -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "❌ Kubeconfig not found at {{.KUBECONFIG_FILE}}"
+          echo "💡 Run 'task cluster-up' first to create the cluster"
+          exit 1
+        fi
+        SVC=$(kubectl --kubeconfig {{.KUBECONFIG_FILE}} get svc -n envoy-gateway-system \
+          -l app.kubernetes.io/name=envoy \
+          -o jsonpath='{.items[0].metadata.name}')
+        if [ -z "$SVC" ]; then
+          echo "❌ Could not find the Envoy Gateway service. Is the cluster/gateway installed?"
+          exit 1
+        fi
+        echo "🌐 Forwarding svc/$SVC -> localhost:8443 (https), localhost:8080 (http)"
+        kubectl --kubeconfig {{.KUBECONFIG_FILE}} port-forward -n envoy-gateway-system svc/$SVC 8443:8443 8080:8080
+
+  grafana-port-forward:
+    desc: "Port-forward Grafana to localhost:3000 (after installing observability)"
+    silent: true
+    cmds:
+      - |
+        if [ ! -f "{{.KUBECONFIG_FILE}}" ]; then
+          echo "❌ Kubeconfig not found at {{.KUBECONFIG_FILE}}"
+          echo "💡 Run 'task cluster-up' first to create the cluster"
+          exit 1
+        fi
+        if ! kubectl --kubeconfig {{.KUBECONFIG_FILE}} get svc grafana-service -n telemetry-system >/dev/null 2>&1; then
+          echo "❌ Grafana service not found. Run 'task install-observability' first."
+          exit 1
+        fi
+        echo "📊 Forwarding svc/grafana-service -> localhost:3000 (admin/datum123)"
+        kubectl --kubeconfig {{.KUBECONFIG_FILE}} port-forward -n telemetry-system svc/grafana-service 3000:3000
 
   cluster-status:
     desc: "Show cluster status and health"
@@ -402,9 +441,9 @@ tasks:
       - kubectl wait --for=condition=Programmed gateway/default-gateway -n envoy-gateway-system --timeout={{.WAIT_TIMEOUT}} || true
       - echo "✅ Envoy Gateway Operator and merged gateway are ready"
       - echo ""
-      - echo "🌐 Gateway exposed ports:"
-      - 'echo "   HTTPS Gateway: https://localhost:8443 (self-signed cert - use -k flag)"'
-      - echo "   To find the actual NodePort assignments, run:"
+      - echo "🌐 Gateway access:"
+      - echo "   NodePort is allocated dynamically. Use 'task gateway-port-forward' to reach"
+      - echo "   it at https://localhost:8443, or find the assigned NodePort directly:"
       - echo "   kubectl get svc -n envoy-gateway-system -l app.kubernetes.io/name=envoy"
 
   install-observability:

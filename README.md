@@ -13,12 +13,19 @@ A comprehensive test‑infrastructure repository designed to support software te
 
 ## Port Configuration
 
-The cluster exposes several ports for easy access without requiring port-forwarding:
+NodePorts for the Envoy Gateway and Grafana are allocated **dynamically** by Kubernetes rather than pinned to fixed host ports. This means multiple `test-infra` clusters (different `CLUSTER_NAME`s) can run concurrently on the same Docker host without port collisions.
 
-- **30443**: HTTPS Gateway (Envoy Gateway)
-- **30000**: Grafana dashboard (after installing observability)
+To reach these services, use the built-in port-forward tasks (recommended):
 
-All ports use non-privileged ranges (>1024) to avoid requiring administrative privileges.
+- `task gateway-port-forward` – forwards the Envoy Gateway to `localhost:8443` (HTTPS) and `localhost:8080` (HTTP)
+- `task grafana-port-forward` – forwards Grafana to `localhost:3000` (after `task install-observability`)
+
+Or find the assigned NodePort directly and reach it via the cluster's Docker network:
+
+```bash
+kubectl get svc -n envoy-gateway-system -l app.kubernetes.io/name=envoy -o jsonpath='{.items[0].spec.ports[*].nodePort}'
+kubectl get svc -n telemetry-system grafana-service -o jsonpath='{.spec.ports[0].nodePort}'
+```
 
 ---
 
@@ -145,7 +152,7 @@ task install-observability        # Add telemetry stack
 - **Victoria Metrics** - Time-series metrics collection and storage
 - **Loki** - Log aggregation with container log collection via Promtail
 - **Tempo** - Distributed tracing storage
-- **Grafana** - Unified dashboard (accessible at http://localhost:30000, admin/datum123)
+- **Grafana** - Unified dashboard (run `task grafana-port-forward`, then visit http://localhost:3000, admin/datum123)
 - **Prometheus CRDs** - Custom resources for advanced metrics scraping and alerting (servicemonitors, podmonitors, etc.)
 
 The observability stack is designed for development and testing environments with appropriate resource limits and simplified configurations.
@@ -212,7 +219,7 @@ task test-infra:k9s                     # Launch k9s terminal UI
 
 **Versions** – run `task ensure-tools` regularly; it will upgrade outdated binaries.
 
-**Docker conflicts** – if port collisions occur, delete the cluster and recreate with a different name: `task cluster-up CLUSTER_NAME=my‑test`.
+**Docker conflicts** – NodePorts are no longer bound to fixed host ports, so running several clusters concurrently (each with a distinct `CLUSTER_NAME`) should not collide on ports. If you still hit a Docker naming/network conflict, delete the cluster and recreate with a different name: `task cluster-up CLUSTER_NAME=my‑test`.
 
 **Permissions** – tools are installed to system directories and may require sudo privileges.
 

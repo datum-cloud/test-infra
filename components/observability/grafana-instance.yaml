@@ -19,6 +19,11 @@ spec:
       alertmanager_config_from_datasources: "true"
     alerting:
       enabled: "false"  # Disable legacy alerting in favor of unified alerting
+  # NodePort without a fixed nodePort: Kubernetes allocates an ephemeral port
+  # per cluster so concurrent clusters on the same host never collide. Find
+  # the assigned port with:
+  #   kubectl get svc -n telemetry-system grafana-service \
+  #     -o jsonpath='{.spec.ports[0].nodePort}'
   service:
     spec:
       type: NodePort
@@ -26,7 +31,6 @@ spec:
         - name: grafana-http
           port: 3000
           targetPort: 3000
-          nodePort: 30000
           protocol: TCP
   deployment:
     spec:
