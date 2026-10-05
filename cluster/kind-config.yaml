@@ -2,19 +2,11 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
-    extraPortMappings:
-      # Grafana (Observability)
-      - containerPort: 30000
-        hostPort: 30000
-        protocol: TCP
-      # Envoy Gateway HTTPS
-      - containerPort: 30443
-        hostPort: 30443
-        protocol: TCP
-      # Envoy Gateway HTTP
-      - containerPort: 30080
-        hostPort: 30080
-        protocol: TCP
+    # No extraPortMappings: NodePorts for Envoy Gateway/Grafana are allocated
+    # dynamically (see components/envoy-gateway-operator and
+    # components/observability), so multiple clusters can run concurrently on
+    # the same Docker host without colliding on fixed host ports. Reach
+    # services via `kubectl port-forward` or the kind Docker network.
 
     # Add audit log configurations
     kubeadmConfigPatches:

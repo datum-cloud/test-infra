@@ -12,6 +12,12 @@ spec:
   provider:
     type: Kubernetes
     kubernetes:
+      # NodePort without a fixed nodePort: Kubernetes allocates an ephemeral
+      # port per cluster, so concurrent clusters on the same host never
+      # collide. Find the assigned port with:
+      #   kubectl get svc -n envoy-gateway-system -l app.kubernetes.io/name=envoy \
+      #     -o jsonpath='{.items[0].spec.ports[*].nodePort}'
+      # or use `task gateway-port-forward` for a stable localhost:8443/8080.
       envoyService:
         type: NodePort
         patch:
@@ -22,12 +28,10 @@ spec:
                 - name: https
                   port: 8443
                   targetPort: 8443
-                  nodePort: 30443
                   protocol: TCP
                 - name: http
                   port: 8080
                   targetPort: 8080
-                  nodePort: 30080
                   protocol: TCP
       envoyDeployment:
         container:
