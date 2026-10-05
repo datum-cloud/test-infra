@@ -208,6 +208,102 @@ task test-infra:kubectl -- get nodes    # Run kubectl commands
 task test-infra:k9s                     # Launch k9s terminal UI
 ```
 
+## Federation topology (Karmada hub + members)
+
+Beyond the single-cluster environment above, this repo can stand up a **Karmada
+federation topology** — a hub cluster running the Karmada control plane plus any
+number of member clusters, joined and labeled — that any Datum service e2e can
+consume. Compute is the first consumer; NSO-style multi-cluster labs are the
+next. The clusters are throwaway, throughput-tuned kind clusters; Karmada is
+installed imperatively via Helm (federation clusters run **no** Flux).
+
+> [!NOTE]
+> The federation tasks use `for:` over `task:` calls, which requires **Task
+> ≥ 3.44**. The single-cluster tasks are unaffected.
+
+### Quick start
+
+```bash
+# Hub + two members, each labeled with a city code.
+task federation-up FEDERATION_MEMBERS="pop-dfw=dfw pop-ord=ord"
+
+task federation-status        # hub + member health, registered clusters
+task federation-down FEDERATION_MEMBERS="pop-dfw=dfw pop-ord=ord"   # tear down
+```
+
+### Member-spec syntax
+
+`FEDERATION_MEMBERS` is a space-separated list of `<kind-cluster-name>[=<label-value>]`
+entries:
+
+- A member's Karmada cluster name **is** its kind cluster name.
+- `=<label-value>` is optional; when present it is applied under
+  `FEDERATION_MEMBER_LABEL_KEY` (default `topology.datum.net/city-code`). Omit it
+  for no label.
+- Names must not contain `=`, and `karmada` is reserved (it collides with a
+  kubeconfig filename).
+
+### Variables
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `FEDERATION_HUB_CLUSTER` | `federation-hub` | Kind cluster hosting Karmada |
+| `FEDERATION_MEMBERS` | _(required)_ | `name[=label]` entries, space-separated |
+| `FEDERATION_MEMBER_LABEL_KEY` | `topology.datum.net/city-code` | Label key for each member's value |
+| `KARMADA_VERSION` | `v1.16.0` | Karmada Helm chart version |
+| `KARMADACTL_VERSION` | `{{KARMADA_VERSION}}` | karmadactl CLI version |
+| `KARMADA_API_NODEPORT` | `32443` | NodePort + host port for the Karmada apiserver |
+| `KARMADA_WAIT_TIMEOUT` | `10m` | Karmada install/converge waits |
+| `FEDERATION_KUBECONFIG_DIR` | `<repo>/kubeconfigs/federation` | Where the kubeconfig bundle lands |
+| `FEDERATION_HUB_KIND_CFG` / `FEDERATION_MEMBER_KIND_CFG` | `cluster/federation/kind-{hub,member}.yaml` | Kind config overrides |
+
+### Kubeconfig bundle
+
+All under `FEDERATION_KUBECONFIG_DIR`:
+
+| File | Contents |
+|------|----------|
+| `<hub>.yaml` | Host-side kubeconfig for the hub cluster |
+| `<member>.yaml` | Host-side kubeconfig per member |
+| `<member>-internal.yaml` | Docker-bridge-IP variant (what Karmada stores for the member) |
+| `karmada.yaml` | Karmada apiserver, server `https://127.0.0.1:<nodeport>` |
+| `karmada-internal.yaml` | Karmada apiserver, server `https://<hub-docker-ip>:<nodeport>` (for in-docker-network reachers) |
+| `federation.env` | Shell-sourceable facts (hub docker IP, NodePort, members) |
+
+### Using from another repository
+
+```yaml
+# Your project's Taskfile.yml
+version: '3'
+
+includes:
+  infra:
+    taskfile: https://raw.githubusercontent.com/datum-cloud/test-infra/v0.7.0/Taskfile.yml
+    vars:
+      REPO_REF: v0.7.0                      # match the include ref for the self-clone
+      FEDERATION_HUB_CLUSTER: my-hub
+      FEDERATION_MEMBERS: my-pop-a=dfw my-pop-b=ord
+```
+
+```bash
+export TASK_X_REMOTE_TASKFILES=1
+task --yes infra:federation-up            # --yes accepts the remote-taskfile trust prompt
+```
+
+> [!IMPORTANT]
+> A remote include shares one root variable namespace, so the foundation's root
+> vars **clobber** a consumer's same-named root vars. Do not define your own root
+> vars with names the foundation uses — `LOCALBIN`, `KARMADACTL`, and the
+> `KARMADA_*` / `FEDERATION_*` families (e.g. name a local tools dir `E2E_BIN`,
+> not `LOCALBIN`). Deliberately steering the foundation by passing those names as
+> `include.vars` (like `KARMADA_API_NODEPORT` above) is exactly how it is meant to
+> be driven and is fine.
+
+CI consumers can instead use the
+[`federation-bootstrap`](.github/actions/federation-bootstrap/action.yaml)
+composite action, which stands up the topology and emits the kubeconfig paths as
+step outputs.
+
 ## Troubleshooting
 
 **Versions** – run `task ensure-tools` regularly; it will upgrade outdated binaries.

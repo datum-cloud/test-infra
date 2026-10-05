@@ -1,0 +1,14 @@
+# Helm values for the Karmada control plane installed on the federation hub.
+#
+# Only static chart values live here. All runtime tuning (etcd --unsafe-no-fsync,
+# leader-election disable, apiserver probe relaxation) intentionally lives in the
+# Taskfile as post-install kubectl patches: the chart does not expose the etcd
+# StatefulSet command args or the apiserver probe fields as values, so splitting
+# the tuning half here and half there would be worse than keeping it in one
+# mechanism. See the federation-tune-karmada task for the rationale on each patch.
+#
+# The API NodePort is passed on the helm command line (--set apiServer.nodePort)
+# from KARMADA_API_NODEPORT so the port has a single source of truth shared with
+# the hub kind config.
+apiServer:
+  serviceType: NodePort
