@@ -364,6 +364,21 @@ tasks:
       - kustomize build {{.REPO_DIR}}/components/cert-manager | kubectl apply -f -
       - echo "⏳ Waiting for cert-manager HelmReleases …"
       - kubectl -n cert-manager wait helmrelease/{cert-manager,cert-manager-csi-driver} --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
+      # A Ready HelmRelease does not guarantee the validating webhook is serving.
+      # Wait for the webhook Deployment and its Service endpoints so later steps
+      # that apply Certificates/Issuers (e.g. the Envoy gateway resources) don't
+      # fail with "connection refused" against cert-manager-webhook.
+      - echo "⏳ Waiting for the cert-manager webhook to be serving …"
+      - kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout={{.WAIT_TIMEOUT}}
+      - |
+        for i in $(seq 1 30); do
+          if kubectl -n cert-manager get endpoints cert-manager-webhook \
+               -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+            break
+          fi
+          echo "  waiting for cert-manager-webhook endpoints ($i)…" >&2
+          sleep 2
+        done
       - echo "✅ cert-manager and CSI driver are ready"
 
   install-flux:
@@ -383,7 +398,17 @@ tasks:
     silent: true
     cmds:
       - echo "➡️  Reconciling Kyverno …"
-      - kustomize build {{.REPO_DIR}}/components/kyverno | kubectl apply --server-side --field-manager=kyverno-installer --force-conflicts -f -
+      # Retry: the kyverno component pulls a manifest from a remote source, which
+      # occasionally fails with a transient TLS/handshake timeout on a cold run.
+      - |
+        for i in $(seq 1 5); do
+          if kustomize build {{.REPO_DIR}}/components/kyverno \
+               | kubectl apply --server-side --field-manager=kyverno-installer --force-conflicts -f -; then
+            break
+          fi
+          echo "  kyverno apply failed (transient remote fetch?), retrying ($i/5)…" >&2
+          sleep 5
+        done
       - echo "⏳ Waiting for Kyverno controllers …"
       - kubectl -n kyverno wait deployment/kyverno-{admission-controller,background-controller,cleanup-controller,reports-controller} --for=condition=Available --timeout={{.WAIT_TIMEOUT}}
       - echo "✅ Kyverno is ready"
@@ -397,7 +422,20 @@ tasks:
       - echo "⏳ Waiting for Envoy Gateway Operator HelmRelease …"
       - kubectl -n flux-system wait helmrelease/envoy-gateway --for=condition=Ready --timeout={{.WAIT_TIMEOUT}}
       - echo "➡️  Applying Gateway Configuration (merged gateway setup) …"
-      - kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator/gateway-resources | kubectl apply -f -
+      # Retry: the gateway resources include a cert-manager Certificate, so this
+      # apply can race the cert-manager webhook coming up (install-components runs
+      # cert-manager and this task concurrently) and fail with "connection
+      # refused". install-cert-manager now waits for the webhook; retry here too
+      # as a belt-and-suspenders against cold-start caBundle injection.
+      - |
+        for i in $(seq 1 10); do
+          if kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator/gateway-resources \
+               | kubectl apply -f -; then
+            break
+          fi
+          echo "  gateway-resources apply failed (cert-manager webhook not ready?), retrying ($i/10)…" >&2
+          sleep 5
+        done
       - echo "⏳ Waiting for Gateway to be ready …"
       - kubectl wait --for=condition=Programmed gateway/default-gateway -n envoy-gateway-system --timeout={{.WAIT_TIMEOUT}} || true
       - echo "✅ Envoy Gateway Operator and merged gateway are ready"
