@@ -1,0 +1,10 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: service-catalog
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/milo-os/service-catalog.git
+  ref:
+    commit: 5f2b663b6c5e039c4c7b666ef3e959803851b675

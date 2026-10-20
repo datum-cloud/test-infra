@@ -1,0 +1,29 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: service-catalog-api-crds
+  namespace: milo-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 2m
+  prune: true
+  dependsOn:
+    - name: milo-core
+      namespace: flux-system
+  sourceRef:
+    kind: GitRepository
+    name: service-catalog
+    namespace: flux-system
+  path: ./config/base/crd
+  kubeConfig:
+    secretRef:
+      name: milo-controller-manager-kubeconfig
+      key: kubeconfig
+  healthChecks:
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: services.services.miloapis.com
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: serviceentitlements.services.miloapis.com
