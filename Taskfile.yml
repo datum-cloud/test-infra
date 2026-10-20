@@ -399,7 +399,7 @@ tasks:
       - echo "➡️  Applying Gateway Configuration (merged gateway setup) …"
       - kustomize build {{.REPO_DIR}}/components/envoy-gateway-operator/gateway-resources | kubectl apply -f -
       - echo "⏳ Waiting for Gateway to be ready …"
-      - kubectl wait --for=condition=Programmed gateway/default-gateway -n envoy-gateway-system --timeout={{.WAIT_TIMEOUT}} || true
+      - kubectl wait --for=condition=Programmed gateway/default-gateway -n envoy-gateway-system --timeout={{.WAIT_TIMEOUT}}
       - echo "✅ Envoy Gateway Operator and merged gateway are ready"
       - echo ""
       - echo "🌐 Gateway exposed ports:"
