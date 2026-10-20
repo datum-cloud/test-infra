@@ -49,7 +49,7 @@ and creates an operator kubeconfig containing only the new token and Milo CA.
 The token stays out of source, stdout, and diagnostics. It verifies that the
 identity can list Projects and Services and update Service status, while it
 cannot read Secrets, create ClusterRoleBindings, or impersonate users. The
-script restores the original auth Secret, removes its optional Flux objects
+script attempts to restore the original auth Secret, remove its optional Flux objects
 and operator namespace, restarts Milo, and resumes root Flux reconciliation on
 success or failure. It retains the pinned real NSO LocationBinding CRD it
 installs as a separate prerequisite. If interrupted before cleanup, remove
@@ -58,6 +58,14 @@ reconcile `milo-core`, then restart `milo-apiserver` to reload the original
 Flux-owned token file. The bound role is resource-scoped,
 but Milo's RBAC-only mode still applies a root grant across project paths;
 this environment cannot prove per-project authorization.
+
+The harness refuses existing resource names, creates its temporary objects
+atomically with a private run marker, compares the auth Secret's current token
+data before changing or restoring it, and deletes owned objects through a
+private API proxy with UID and resourceVersion preconditions. Webhook CA
+changes compare UID, resourceVersion, generation, webhook names, and current
+client configuration. If an uncertain mutation cannot be proved owned, cleanup
+reports failure rather than adopting or deleting a replacement object.
 
 The isolated trial was invoked from this repository with its two private
 kubeconfigs and no ambient context changes:
