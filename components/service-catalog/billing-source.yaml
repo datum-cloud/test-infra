@@ -1,0 +1,11 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: catalog-billing
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: oci://ghcr.io/milo-os/billing-kustomize
+  ref:
+    # v0.0.0-main from milo-os/billing e73d053255bdbdea5fc5609133474fa971b583b9.
+    digest: sha256:9e772461787d0b0f2561ed348109a6d80e171d04eeea9fee36a4e5a67d37f20c
