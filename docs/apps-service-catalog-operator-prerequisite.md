@@ -37,20 +37,55 @@ static tokens from `milo-apiserver-auth-tokens`. Its existing admin token belong
 to `system:masters`; its test-user token belongs to `system:authenticated`.
 The upstream Catalog Milo E2E also uses a `system:masters` operator token, but
 copying the existing broad admin kubeconfig to the operator was rejected by
-automatic approval review. No operator credential Secret or Deployment was
-installed. A scoped deployment needs a task-only, randomly generated token for
+automatic approval review. A scoped deployment instead uses a task-only, randomly generated token for
 the dedicated User, its exact upstream ClusterRoleBinding in Milo, and an
 in-cluster CA-backed kubeconfig containing only that token in
 `services-system/milo-kubeconfig`. The static token file is currently owned by
-Milo's Flux Kustomization, so issuance must be reconciled with that owner and
-the API server must pick up the new token. The bound role is resource-scoped,
+Milo's Flux Kustomization. `hack/test-service-catalog-operator.py` stages this
+as a bounded trial: it suspends that one Kustomization, checks the auth Secret's
+UID and exact two-user baseline, adds a fresh random `system:authenticated`
+token for the dedicated User, restarts Milo, binds the exact upstream role,
+and creates an operator kubeconfig containing only the new token and Milo CA.
+The token stays out of source, stdout, and diagnostics. It verifies that the
+identity can list Projects and Services and update Service status, while it
+cannot read Secrets, create ClusterRoleBindings, or impersonate users. The
+script restores the original auth Secret, removes its optional Flux objects
+and operator namespace, restarts Milo, and resumes root Flux reconciliation on
+success or failure. It retains the pinned real NSO LocationBinding CRD it
+installs as a separate prerequisite. If interrupted before cleanup, remove
+the optional operator/RBAC Flux objects and operator namespace, resume and
+reconcile `milo-core`, then restart `milo-apiserver` to reload the original
+Flux-owned token file. The bound role is resource-scoped,
 but Milo's RBAC-only mode still applies a root grant across project paths;
 this environment cannot prove per-project authorization.
 
-After the certificate is Ready, the Catalog webhook configurations in Milo
-need its issued CA bundle, as the upstream `hack/e2e-milo/up.sh` does. The
-operator must then become Ready and log engagement of all three Projects;
-those checks have not been run. The real NSO `LocationBinding` CRD and IPAM's
-aggregated `IPClass` API are separate dependencies for Catalog projection and
-provisioning, and are not installed here. No entitlement, native Workload, or
-network route result follows from this prerequisite stage.
+The isolated trial was invoked from this repository with its two private
+kubeconfigs and no ambient context changes:
+
+```sh
+KUBECONFIG=/tmp/apps-a1t-kubeconfig \
+CATALOG_MILO_KUBECONFIG=/tmp/apps-a1t-milo-host-kubeconfig \
+CATALOG_HOST_CONTEXT=kind-apps-a1t-gateway-20261020 \
+CATALOG_MILO_HTTPS_PORT=41443 \
+python3 hack/test-service-catalog-operator.py
+```
+
+The scoped trial passed on the isolated cluster. The role denied Secret reads,
+ClusterRoleBinding creation, and user impersonation; it allowed Project and
+Service lists and Service status updates. Flux reconciled the source-matched
+Catalog operator image. Its Deployment and serving Certificate became Ready,
+and the manager logged engagement of the provider and both consumer Projects.
+The script injected the certificate CA into Milo's real webhook configurations
+after issuance, as upstream `hack/e2e-milo/up.sh` does. Afterward it removed
+the temporary operator, credential Secret, role, namespace, and CA injection,
+restored the exact original two-user auth Secret, restarted Milo, and resumed
+root Flux. Read-only follow-up found `milo-core` Ready at the original source
+revision, no `services-system` namespace or Catalog operator role, and empty
+CA bundles again.
+
+The trial installed the real NSO `LocationBinding` CRD from source commit
+`4c4c48ecb5e7f0f4d1950e6441ebe0c02afcfb96` with file SHA-256
+`73fc1945ec88f651ee6ace8518a4593792c005af0d52dbc8da3e22d1f173f875`.
+It remains in Milo as a separate prerequisite. IPAM's aggregated `IPClass`
+API is not installed, so Catalog provisioning was not tested. No entitlement,
+native Workload, or network route result follows from this prerequisite stage.

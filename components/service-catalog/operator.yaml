@@ -9,7 +9,6 @@ spec:
   timeout: 3m
   prune: true
   dependsOn:
-    - name: milo-core
     - name: service-catalog-api-crds
       namespace: milo-system
     - name: service-catalog-billing-crds
