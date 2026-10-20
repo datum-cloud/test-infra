@@ -23,6 +23,14 @@ Prometheus Operator CRD. The pinned Milo service bundle omits the namespace
 on one PolicyBinding, so the graph supplies its `milo-system` namespace and
 matching role reference.
 
+For aggregated extension APIs, the graph also creates a client-auth
+certificate from Milo's existing CA and mounts it into the apiserver with
+`PROXY_CLIENT_CERT_FILE` and `PROXY_CLIENT_KEY_FILE`. Without that identity,
+IPAM receives `system:anonymous` for project-path requests even when its
+APIService reports Available. The bootstrap script stages the namespace and
+Certificate before the core Flux health gate; the namespace metadata matches
+the pinned Milo overlay.
+
 The `bootstrap-kind-test` workflow runs `hack/test-milo-flux.sh` after the
 Gateway fixture. The script requires an explicit private `KUBECONFIG` and
 matching `MILO_FLUX_CONTEXT`; it can run from any working directory. It

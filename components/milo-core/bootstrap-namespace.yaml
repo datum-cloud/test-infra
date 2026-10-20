@@ -1,0 +1,9 @@
+# Match the pinned Milo test-infra overlay so the certificate and child Flux
+# Kustomizations can be created before the root Kustomization reports Ready.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: milo-system
+  labels:
+    app.kubernetes.io/name: milo
+    app.kubernetes.io/part-of: milo-control-plane

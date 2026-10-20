@@ -35,9 +35,11 @@ capture() {
 }
 trap capture EXIT
 
-# The upstream Milo overlay creates milo-system. Apply its root first: a
-# single bulk apply fails on a new cluster because the child Flux objects
-# themselves live in that namespace.
+# The namespace matches the pinned Milo overlay. The aggregator client
+# Certificate must exist before the root Flux health gate; its issuer is
+# created by that root and cert-manager issues it as reconciliation proceeds.
+k apply -f "$repo_root/components/milo-core/bootstrap-namespace.yaml"
+k apply -f "$repo_root/components/milo-core/front-proxy-certificate.yaml"
 k apply -f "$repo_root/components/milo-core/source.yaml"
 k apply -f "$repo_root/components/milo-core/resource-metrics-source.yaml"
 k apply -f "$repo_root/components/milo-core/core.yaml"
@@ -49,6 +51,7 @@ flux reconcile source git milo-resource-metrics -n flux-system --timeout=180s
 
 flux reconcile kustomization milo-core -n flux-system --timeout=360s
 k get namespace milo-system >/dev/null
+k -n milo-system wait certificate/milo-front-proxy-client --for=condition=Ready --timeout=120s
 k apply -k "$repo_root/components/milo-core"
 flux reconcile kustomization milo-infra-crds -n flux-system --timeout=180s
 flux reconcile kustomization milo-api-resource-metrics-crd -n milo-system --timeout=180s

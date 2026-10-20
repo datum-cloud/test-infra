@@ -26,6 +26,38 @@ spec:
         - op: replace
           path: /spec/values/controller/metrics/serviceMonitor/enabled
           value: false
+    # Milo's test overlay omits the aggregator client certificate. Without it,
+    # extension API servers receive system:anonymous instead of the caller and
+    # project context. The local certificate is issued by that overlay's CA.
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: milo-apiserver
+      patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: milo-apiserver
+          namespace: milo-system
+        spec:
+          template:
+            spec:
+              containers:
+                - name: milo-apiserver
+                  env:
+                    - name: PROXY_CLIENT_CERT_FILE
+                      value: /etc/kubernetes/pki/front-proxy/tls.crt
+                    - name: PROXY_CLIENT_KEY_FILE
+                      value: /etc/kubernetes/pki/front-proxy/tls.key
+                  volumeMounts:
+                    - name: front-proxy
+                      mountPath: /etc/kubernetes/pki/front-proxy
+                      readOnly: true
+              volumes:
+                - name: front-proxy
+                  secret:
+                    secretName: milo-front-proxy-client
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
       kind: HelmRelease
