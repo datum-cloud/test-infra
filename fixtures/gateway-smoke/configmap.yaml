@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-smoke-response
+  namespace: apps-a1t-smoke
+data:
+  index.html: "datum-a1t-gateway-ok\n"

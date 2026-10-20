@@ -7,4 +7,5 @@ spec:
   interval: 12h
   url: oci://docker.io/envoyproxy/gateway-helm
   ref:
-    tag: v1.8.2
+    # Envoy Gateway v1.8.2, resolved from the registry and Flux artifact.
+    digest: sha256:bd2d3e5ebeab47cbf06fd3ab31a1546e8b1b2d2d9a98d4e9378b880be8751249

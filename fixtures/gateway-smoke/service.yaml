@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-smoke
+  namespace: apps-a1t-smoke
+spec:
+  selector:
+    app: gateway-smoke
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

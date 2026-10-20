@@ -25,35 +25,45 @@ jobs:
         with:
           cluster_name: test-infra
           wait_timeout: 240s
-          images: |
-            nginx:1.27-alpine
-            busybox:latest
-
-      - name: Verify images pre-loaded on every node
-        run: |
-          set -euo pipefail
-          CLUSTER=test-infra
-      
-          # Exactly what you asked KIND to load
-          IMAGES=(
-            "docker.io/library/nginx:1.27-alpine"
-            "docker.io/library/busybox:latest"
-          )
-      
-          for node in $(kind get nodes --name "$CLUSTER"); do
-            # Build a simple newline-separated list: repo:tag
-            image_list=$(docker exec "$node" crictl images \
-                            | awk 'NR>1 {print $1 ":" $2}')   # skip header
-      
-            for img in "${IMAGES[@]}"; do
-              if grep -qx "$img" <<<"$image_list"; then
-                echo "✅ $img present on $node"
-              else
-                echo "❌ $img missing on $node"
-                exit 1
-              fi
-            done
-          done
+          test_infra_ref: ${{ github.sha }}
 
       - name: Smoke-check cluster
         run: kubectl get pods -A
+
+      - name: Exercise Gateway HTTPRoute data path
+        working-directory: test-infra
+        env:
+          GATEWAY_SMOKE_CONTEXT: kind-test-infra
+          GATEWAY_SMOKE_IMAGE: docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+          GATEWAY_SMOKE_DIAG_DIR: ${{ github.workspace }}/diagnostics/gateway-smoke
+        run: bash hack/test-gateway-route.sh
+
+      - name: Capture bootstrap and Flux diagnostics
+        if: always()
+        run: |
+          mkdir -p diagnostics
+          kind get clusters > diagnostics/kind-clusters.txt 2>&1 || true
+          if [ -f test-infra/kubeconfig ]; then
+            export KUBECONFIG="$PWD/test-infra/kubeconfig"
+            kubectl get nodes,pods -A -o wide > diagnostics/cluster.txt 2>&1 || true
+            kubectl get gitrepositories,ocirepositories,kustomizations,helmreleases -A -o yaml > diagnostics/flux.yaml 2>&1 || true
+            kubectl get gateways,httproutes -A -o yaml > diagnostics/routes.yaml 2>&1 || true
+            kubectl get events -A --sort-by=.lastTimestamp > diagnostics/events.txt 2>&1 || true
+          fi
+
+      - name: Delete only the CI kind cluster
+        if: always()
+        run: |
+          if kind get clusters | grep -Fxq test-infra; then
+            kind delete cluster --name test-infra > diagnostics/cleanup.txt 2>&1
+          else
+            echo "test-infra cluster was not present" > diagnostics/cleanup.txt
+          fi
+          kind get clusters >> diagnostics/cleanup.txt 2>&1 || true
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-kind-diagnostics
+          path: diagnostics/
