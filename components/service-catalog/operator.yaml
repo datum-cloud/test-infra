@@ -1,0 +1,36 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: service-catalog-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 3m
+  prune: true
+  dependsOn:
+    - name: service-catalog-api-crds
+      namespace: milo-system
+    - name: service-catalog-billing-crds
+      namespace: milo-system
+    - name: service-catalog-operator-rbac
+      namespace: milo-system
+  sourceRef:
+    kind: GitRepository
+    name: service-catalog
+  path: ./config/overlays/e2e-milo/operator
+  # The upstream Deployment expects services-system/milo-kubeconfig. This
+  # Kustomization is deliberately opt-in until a dedicated scoped Milo token
+  # and CA-backed kubeconfig have been provisioned for that Secret.
+  images:
+    - name: ghcr.io/milo-os/service-catalog
+      digest: sha256:a5c5e4c31c9f89edac64d6a4c02a70320c04b4e1ca95aabab6567a0a1357b1e2
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: services-controller-manager
+      namespace: services-system
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: services-serving-cert
+      namespace: services-system

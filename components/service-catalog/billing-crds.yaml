@@ -1,0 +1,29 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: service-catalog-billing-crds
+  namespace: milo-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 2m
+  prune: true
+  dependsOn:
+    - name: milo-core
+      namespace: flux-system
+  sourceRef:
+    kind: OCIRepository
+    name: catalog-billing
+    namespace: flux-system
+  path: ./base/crd/bases
+  kubeConfig:
+    secretRef:
+      name: milo-controller-manager-kubeconfig
+      key: kubeconfig
+  healthChecks:
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: billingaccountbindings.billing.miloapis.com
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: billingentitlements.billing.miloapis.com
