@@ -11,10 +11,13 @@ That bundle reports source revision
 multi-platform IPAM image index to
 `sha256:9811093733ccc8e0e56ab86ba959dda73d8035a08a6feb7d3a91c5cd10011a3e`;
 its amd64 and arm64 OCI revision/source labels report that full commit and
-`https://github.com/milo-os/ipam`. The database stage uses CloudNativePG
-chart `0.29.0` with observed chart artifact digest
-`sha256:668e065ff53508d58238788fd35b355a925060843629a951df0e6a9362e6d32f`,
-pins its operator image to
+`https://github.com/milo-os/ipam`. The database stage uses the official
+CloudNativePG `0.29.0` OCI chart pinned by manifest digest
+`sha256:209c588b902982bf283a0073db83edd422d9710a2c8a670fe57c0329abe789a4`.
+Its chart layer is
+`sha256:668e065ff53508d58238788fd35b355a925060843629a951df0e6a9362e6d32f`.
+The harness verifies both digests before creating the HelmRelease. That
+release pins its operator image to
 `sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb`,
 and pins the PostgreSQL 17.0 image to
 `sha256:0a198589e4edca8f169399dd4d082e18de47d289c5f2b7670c9d7bbd9e6f323b`.
@@ -51,6 +54,12 @@ through private API proxies. Flux and CloudNativePG CRDs installed by their
 charts remain as system prerequisites after this trial; the trial namespace,
 database, credentials, and IPAM APIService are removed.
 
+The project context URLs must exactly address each named Milo project path;
+the temporary scoped token kubeconfig is not written if a URL points anywhere
+else. Milo's test mode uses root RBAC grants across project paths. The pool
+list assertions therefore demonstrate storage and context isolation, not
+production tenant IAM. They do not test project name reuse after UID changes.
+
 The isolated trial reached the actual project-scoped API with the non-admin
 identity and received an `IPPoolList`. It created an `IPClass` and `IPPool` in
 `apps-a1t-provider`, then listed the pool in that project and confirmed it was
@@ -58,12 +67,14 @@ absent from `apps-a1t-consumer-a`, `apps-a1t-consumer-b`, and Milo root. The
 same identity was denied Secret reads, ClusterRoleBinding creation, and user
 impersonation. The pinned CNPG database, IPAM Certificate, runtime Deployment,
 and Flux Kustomizations all became Ready during the trial. The diagnostic log
-is `/tmp/apps-a1t-ipam-trial-6.log` in the private local workspace; it contains
+is `/tmp/apps-a1t-ipam-trial-8.log` in the private local workspace; it contains
 no token or database password. The final run exited 0 after checking the
 deployed CNPG operator, PostgreSQL, and IPAM images against their exact
-digests and the Flux IPAM last-applied revision against the OCI digest. A
-read-only Flux HelmChart query during the run reported the chart artifact
-digest above; the harness now checks that digest as a fail-closed gate too.
+digests and the Flux IPAM last-applied revision against the OCI digest. Before
+installing CNPG, Flux reported the pinned chart OCI revision
+`sha256:209c588b...` and artifact digest `sha256:668e065...`, both matching
+the harness gates. The same run exercised the exact project-context URL
+validation.
 Post-cleanup reads found no trial namespaces, IPAM Flux objects, APIService,
 or probe roles. Milo core remained Ready at its pinned source revision, the
 front-proxy Certificate remained Ready, and the CloudNativePG Cluster CRD

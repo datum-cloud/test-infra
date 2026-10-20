@@ -36,6 +36,7 @@ PROJECT_API = "/apis/resourcemanager.miloapis.com/v1alpha1/projects"
 IPAM_REVISION = "sha256:f006b5604a924b0ce33adf98644cb106234b75a80fcc937214f3f7e327f8c2eb"
 IPAM_IMAGE = "ghcr.io/milo-os/ipam@sha256:9811093733ccc8e0e56ab86ba959dda73d8035a08a6feb7d3a91c5cd10011a3e"
 CNPG_IMAGE = "ghcr.io/cloudnative-pg/cloudnative-pg@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
+CNPG_OCI_DIGEST = "sha256:209c588b902982bf283a0073db83edd422d9710a2c8a670fe57c0329abe789a4"
 CNPG_CHART_DIGEST = "sha256:668e065ff53508d58238788fd35b355a925060843629a951df0e6a9362e6d32f"
 PG_IMAGE = "ghcr.io/cloudnative-pg/postgresql:17.0@sha256:0a198589e4edca8f169399dd4d082e18de47d289c5f2b7670c9d7bbd9e6f323b"
 
@@ -202,8 +203,11 @@ def setup_probe_kubeconfig(private):
     for c in sources["contexts"]:
         if c["name"] in ("milo-root", PROVIDER, *CONSUMERS):
             contexts[c["name"]] = by_name[c["context"]["cluster"]]
-    if set(contexts) != {"milo-root", PROVIDER, *CONSUMERS}:
-        raise RuntimeError("private Milo kubeconfig lacks expected project contexts")
+    expected = {"milo-root": f"https://127.0.0.1:{MILO_PORT}"}
+    expected.update({name: f"https://127.0.0.1:{MILO_PORT}{PROJECT_API}/{name}/control-plane"
+                     for name in (PROVIDER, *CONSUMERS)})
+    if contexts != expected:
+        raise RuntimeError("private Milo kubeconfig has missing or unexpected project URLs")
     out = {"apiVersion": "v1", "kind": "Config", "current-context": "milo-root",
            "clusters": [{"name": name, "cluster": {"server": server,
                          "insecure-skip-tls-verify": True}} for name, server in contexts.items()],
@@ -277,7 +281,7 @@ def preflight():
     for kind, name, ns in [
         ("namespace", "ipam-system", None), ("namespace", "cnpg-system", None),
         ("ocirepository", "ipam", "flux-system"),
-        ("helmrepository", "cnpg", "cnpg-system"),
+        ("ocirepository", "cnpg", "cnpg-system"),
         ("helmrelease", "cnpg", "cnpg-system"),
         ("kustomization", "ipam-ca", "flux-system"),
         ("kustomization", "ipam-runtime", "flux-system"),
@@ -343,17 +347,21 @@ def main():
                      "metadata": {"name": name}}, None, f"/api/v1/namespaces/{name}")
             add("host", host, manifest(ROOT / "components/ipam/source.yaml"), "flux-system",
                 "/apis/source.toolkit.fluxcd.io/v1/namespaces/flux-system/ocirepositories/ipam")
-            add("host", host, manifest(ROOT / "components/ipam/cnpg-repository.yaml"), "cnpg-system",
-                "/apis/source.toolkit.fluxcd.io/v1/namespaces/cnpg-system/helmrepositories/cnpg")
+            add("host", host, manifest(ROOT / "components/ipam/cnpg-source.yaml"), "cnpg-system",
+                "/apis/source.toolkit.fluxcd.io/v1/namespaces/cnpg-system/ocirepositories/cnpg")
+            flux("reconcile", "source", "oci", "cnpg", "-n", "cnpg-system",
+                 "--timeout=180s", timeout=210)
+            chart = json.loads(host("-n", "cnpg-system", "get", "ocirepository", "cnpg",
+                                    "-o", "json"))
+            if chart["spec"].get("ref", {}).get("digest") != CNPG_OCI_DIGEST or \
+               chart.get("status", {}).get("artifact", {}).get("revision") != CNPG_OCI_DIGEST or \
+               chart.get("status", {}).get("artifact", {}).get("digest") != CNPG_CHART_DIGEST:
+                raise RuntimeError("CNPG OCI chart content differs from pinned digest before install")
             add("host", host, manifest(ROOT / "components/ipam/cnpg-release.yaml"), "cnpg-system",
                 "/apis/helm.toolkit.fluxcd.io/v2/namespaces/cnpg-system/helmreleases/cnpg")
             flux("reconcile", "source", "oci", "ipam", "-n", "flux-system", "--timeout=120s", timeout=150)
             flux("reconcile", "helmrelease", "cnpg", "-n", "cnpg-system",
-                 "--with-source", "--timeout=600s", timeout=630)
-            chart = json.loads(host("-n", "cnpg-system", "get", "helmchart",
-                                    "cnpg-system-cnpg", "-o", "json"))
-            if chart.get("status", {}).get("artifact", {}).get("digest") != CNPG_CHART_DIGEST:
-                raise RuntimeError("CNPG chart content differs from the pinned artifact")
+                 "--timeout=600s", timeout=630)
             host("wait", "crd/clusters.postgresql.cnpg.io", "--for=condition=Established",
                  "--timeout=120s", timeout=140)
             host("-n", "cnpg-system", "rollout", "status", "deployment/cnpg-cloudnative-pg",

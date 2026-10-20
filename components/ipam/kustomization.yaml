@@ -3,5 +3,5 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - source.yaml
-  - cnpg-repository.yaml
+  - cnpg-source.yaml
   - cnpg-release.yaml

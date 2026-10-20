@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: cnpg
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg
+  ref:
+    digest: sha256:209c588b902982bf283a0073db83edd422d9710a2c8a670fe57c0329abe789a4
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
