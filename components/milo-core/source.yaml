@@ -1,0 +1,10 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: milo
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/milo-os/milo.git
+  ref:
+    commit: ba4b06e8dde99dd70e9a2f34e011d635e4408a76

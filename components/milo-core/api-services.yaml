@@ -1,0 +1,36 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: milo-api-services
+  namespace: milo-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 3m
+  prune: true
+  dependsOn:
+    - name: milo-api-resource-metrics-crd
+    - name: milo-api-webhooks
+  sourceRef:
+    kind: GitRepository
+    name: milo
+    namespace: flux-system
+  path: ./config/services
+  patches:
+    # The pinned Milo service bundle omits this namespaced binding's namespace.
+    - target:
+        group: iam.miloapis.com
+        version: v1alpha1
+        kind: PolicyBinding
+        name: authenticated-user-resource-registration-read
+      patch: |-
+        - op: add
+          path: /metadata/namespace
+          value: milo-system
+        - op: add
+          path: /spec/roleRef/namespace
+          value: milo-system
+  kubeConfig:
+    secretRef:
+      name: milo-controller-manager-kubeconfig
+      key: kubeconfig

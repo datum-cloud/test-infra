@@ -1,0 +1,10 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: milo-resource-metrics
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/milo-os/resource-metrics.git
+  ref:
+    commit: 0bb44b7ed38b37bf5266596f135a50947baf03e1
