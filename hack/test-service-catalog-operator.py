@@ -81,6 +81,12 @@ def get_optional(namespace, kind, name):
     return json.loads(result) if result.strip() else None
 
 
+def root_get_optional(kind, name):
+    # A denied or unavailable Milo API must fail preflight, not look absent.
+    result = root("get", kind, name, "--ignore-not-found", "-o", "json")
+    return json.loads(result) if result.strip() else None
+
+
 def mark_created(manifest, run_id, state, sensitive=False):
     manifest.setdefault("metadata", {}).setdefault("labels", {})["apps-a1t.datum.net/run-id"] = run_id
     state["intent"] = True
@@ -344,6 +350,14 @@ def main():
     ]:
         if get_optional(namespace, kind, name) is not None:
             raise RuntimeError(f"refusing collision with existing {kind}/{name}")
+    # Flux's remote apply could otherwise adopt these existing cluster-scoped
+    # objects, and pruning our short-lived Kustomization would then delete them.
+    # The operator overlay's only host cluster-scoped object is the namespace
+    # checked above; its remaining resources are namespaced there.
+    for kind in ("clusterrole", "clusterrolebinding"):
+        name = "services-controller-manager"
+        if root_get_optional(kind, name) is not None:
+            raise RuntimeError(f"refusing collision with existing Milo {kind}/{name}")
 
     with tempfile.TemporaryDirectory(prefix="apps-a1t-catalog-", dir="/tmp") as tmp:
         private = Path(tmp)
