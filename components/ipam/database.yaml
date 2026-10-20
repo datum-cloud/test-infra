@@ -1,0 +1,28 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ipam-db
+  namespace: ipam-system
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.0@sha256:0a198589e4edca8f169399dd4d082e18de47d289c5f2b7670c9d7bbd9e6f323b
+  bootstrap:
+    initdb:
+      database: ipam
+      owner: ipam
+      secret:
+        name: postgres-credentials
+  storage:
+    size: 1Gi
+  postgresql:
+    parameters:
+      synchronous_commit: "off"
+      max_connections: "200"
+      shared_buffers: 192MB
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 512Mi

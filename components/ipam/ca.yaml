@@ -1,0 +1,19 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ipam-ca
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 2m
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: ipam
+  path: ./components/cert-manager-ca
+  healthChecks:
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: ipam-ca
+      namespace: ipam-system

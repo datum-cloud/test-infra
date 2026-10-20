@@ -1,0 +1,11 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: ipam
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: oci://ghcr.io/milo-os/ipam-kustomize
+  # OCI revision: v0.0.0-2f31bea@sha1:2f31bea79f624c5a94437dc20d82f8f8bdac666e
+  ref:
+    digest: sha256:f006b5604a924b0ce33adf98644cb106234b75a80fcc937214f3f7e327f8c2eb
