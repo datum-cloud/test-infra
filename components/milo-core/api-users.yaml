@@ -1,0 +1,46 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: milo-api-test-users
+  namespace: milo-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 2m
+  prune: true
+  dependsOn:
+    - name: milo-core
+      namespace: flux-system
+  sourceRef:
+    kind: GitRepository
+    name: milo
+    namespace: flux-system
+  path: ./config/overlays/test-infra/resources
+  kubeConfig:
+    secretRef:
+      name: milo-controller-manager-kubeconfig
+      key: kubeconfig
+  # This source directory also holds infrastructure-cluster resources.
+  # Remove those from the generated Kustomization before applying to Milo API.
+  patches:
+    - patch: |-
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: milo-system
+        $patch: delete
+      target:
+        version: v1
+        kind: Namespace
+        name: milo-system
+    - patch: |-
+        apiVersion: cert-manager.io/v1
+        kind: Certificate
+        metadata:
+          name: milo-apiserver-tls
+        $patch: delete
+      target:
+        group: cert-manager.io
+        version: v1
+        kind: Certificate
+        name: milo-apiserver-tls

@@ -1,0 +1,45 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: milo-core
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: milo
+  path: ./config/overlays/test-infra
+  images:
+    - name: ghcr.io/milo-os/milo
+      digest: sha256:3a89b1edb93eb3d4bb74808cc031897055e6130bf36aea56d978fcf252464afd
+  # The base test-infra bootstrap does not install Prometheus Operator CRDs.
+  patches:
+    - target:
+        group: helm.toolkit.fluxcd.io
+        version: v2
+        kind: HelmRelease
+        name: argo-events
+      patch: |-
+        - op: replace
+          path: /spec/values/controller/metrics/serviceMonitor/enabled
+          value: false
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: etcd
+      namespace: milo-system
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: argo-events
+      namespace: milo-system
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: milo-apiserver
+      namespace: milo-system
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: milo-controller-manager
+      namespace: milo-system

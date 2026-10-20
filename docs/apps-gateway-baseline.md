@@ -34,8 +34,7 @@ assertion requires HTTP 200 and the exact fixture response. The default test
 deadline is 240 seconds, with an additional bounded cleanup wait. Set
 `GATEWAY_SMOKE_DIAG_DIR` to retain local diagnostics at a chosen path.
 
-The next A1-T slice must deploy pinned Milo core and project control planes,
-Service Catalog, Compute Workload, networking, and the Apps test overlay through
-Flux, then run through distinct project API identities and verify a live route
-to a native Workload. Those tests remain incomplete until their service sources,
-image digests, API contracts, and admission guard are available.
+The CI workflow also runs the separate pinned Milo Flux prerequisite described
+in [apps-milo-flux-baseline.md](apps-milo-flux-baseline.md). A1-T still requires
+Service Catalog, Compute Workload, networking, and the Apps test overlay, then
+distinct project API identities and a live route to a native Workload.

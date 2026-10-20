@@ -38,6 +38,13 @@ jobs:
           GATEWAY_SMOKE_DIAG_DIR: ${{ github.workspace }}/diagnostics/gateway-smoke
         run: bash hack/test-gateway-route.sh
 
+      - name: Reconcile pinned Milo and probe its API
+        working-directory: test-infra
+        env:
+          MILO_FLUX_CONTEXT: kind-test-infra
+          MILO_FLUX_DIAG_DIR: ${{ github.workspace }}/diagnostics/milo-flux
+        run: bash hack/test-milo-flux.sh
+
       - name: Capture bootstrap and Flux diagnostics
         if: always()
         run: |

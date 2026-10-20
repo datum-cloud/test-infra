@@ -6,7 +6,7 @@ as the full Apps A1-T or G4 end-to-end result.
 ## Revisions and isolation
 
 - `datum-cloud/test-infra` starting commit: `da6b1250d7f6b0ae46feb5aff49446e074510258`.
-- Apps enhancement/architecture source: `datum-labs/apps` PR #929 head
+- Apps enhancement/architecture source: `datum-cloud/enhancements` PR #929 head
   `4db04b51b9c1274e24bf1e34ffafcb0f1b2f0d05`.
 - kind v0.31.0, Kubernetes node v1.32.0, Flux CLI v2.8.2, Docker 29.6.2.
 - Envoy Gateway v1.8.2 OCI source revision:
