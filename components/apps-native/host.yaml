@@ -18,7 +18,7 @@ spec:
   path: ./config/overlays/test-infra/host
   images:
     - name: ghcr.io/datum-labs/apps
-      digest: sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12
+      digest: sha256:bfa9514b9fab3c36efff6cd1e9b700029ecce6d73e41da4b772ae5ddb8686ee9
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment

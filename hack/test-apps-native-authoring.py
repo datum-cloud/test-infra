@@ -38,14 +38,14 @@ from apps_native_cli.driver import (AppsCLI, CLI_SHA, build_private_cli,
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APPS_BINARY_SHA = "b28933ec578cfa1ce785948b3063f45698bbd1bf"
+APPS_BINARY_SHA = "0b1c574d8c7ee6e65ce165dee689a9af9bc1e6dc"
 # Registry-verified exact-definition runtime; keep this fence source-matched.
-CONTENT_SAFE_BINARY_SHA = "b28933ec578cfa1ce785948b3063f45698bbd1bf"
-APPS_IMAGE = "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
-ARM_MANIFEST = "sha256:5a202d5ca1416edf006a8b4a779a1a8df6be11774d93b3c4ffc3e484f0c7a798"
-ARM_CONFIG = "sha256:5ea39c7a90472c9cd506ef5862c73c7fbf8ad3237edd1272a16442795dce2709"
-AMD_MANIFEST = "sha256:f397a96926a421fb04966d2f1ef76a49144311b843eba4cd4486f642abe1f102"
-AMD_CONFIG = "sha256:32544b2b4e6c9dc3741dc8634eeaff69505762c4a6b58842c9c15604ed347540"
+CONTENT_SAFE_BINARY_SHA = "0b1c574d8c7ee6e65ce165dee689a9af9bc1e6dc"
+APPS_IMAGE = "ghcr.io/datum-labs/apps@sha256:bfa9514b9fab3c36efff6cd1e9b700029ecce6d73e41da4b772ae5ddb8686ee9"
+ARM_MANIFEST = "sha256:b945467041c253514d45c2b5e18784a35c80ed43c298b023a3109c2278cffea4"
+ARM_CONFIG = "sha256:b14c53fa1f41f7579857fa5a25f8cbbd7b086f1e7a8f62845a3a41f6856faee3"
+AMD_MANIFEST = "sha256:a6acb1a97d420d248a7ae1c98db1177b9a24fba61dcaf134c690296702900f6a"
+AMD_CONFIG = "sha256:dc6608b84639ba1f618dddd671012f1809229d201fd874d337ca93bb00518b76"
 PLATFORM_DIGESTS = {"arm64": (ARM_MANIFEST, ARM_CONFIG),
                     "amd64": (AMD_MANIFEST, AMD_CONFIG)}
 REGISTRY_IMAGE = "docker.io/library/registry@sha256:fa647fc1e5d5df7d8d923fb6332aab8e78783f8fca1a1394efb4011f68f5a793"
