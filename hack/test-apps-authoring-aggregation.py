@@ -274,6 +274,14 @@ current-context: author
                     message=result.stderr.strip().replace(tokens["author"],"<redacted>")
                     raise RuntimeError(f"datumctl {' '.join(args[:4])} did not report expected denial ({error_contains!r}): {message[:400]}")
                 return result.stdout
+            def project_snapshot(project, name):
+                project_api=base+f"/apis/{PROJECT}/v1alpha1/projects/{project}/control-plane/apis/{GROUP}/v1alpha1"
+                object_code,obj=req(project_api+"/apptemplates/"+name,tokens["author"],ctx=tls)
+                list_code,listing=req(project_api+"/apptemplaterevisions",tokens["author"],ctx=tls)
+                if object_code!=200 or list_code!=200 or not isinstance(listing,dict) or not isinstance(listing.get("items"),list):
+                    raise RuntimeError(f"state snapshot failed for project {project}: object={object_code}, revisions={list_code}")
+                listing["items"].sort(key=lambda item:(item.get("metadata",{}).get("name",""),item.get("metadata",{}).get("uid","")))
+                return {"object":obj,"revisions":listing["items"]}
             # API fixtures are actual resources stored by Milo; no Project/SAR handler is substituted.
             root("POST","/api/v1/namespaces",{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"apps-system"}},201)
             root("POST",f"/apis/{PROJECT}/v1alpha1/organizations",{"apiVersion":f"{PROJECT}/v1alpha1","kind":"Organization","metadata":{"name":"apps-proof-org"},"spec":{"type":"Standard","contactInfo":{"email":"owner@example.test","name":"Owner"}}},201)
@@ -320,58 +328,74 @@ current-context: author
             code,hist=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
             if code!=200 or len(hist.get("items",[]))!=2:raise RuntimeError("revision history count mismatch")
             first_revision=min(hist["items"],key=lambda r:r["spec"]["sequence"])
+            state_before_diff=project_snapshot("apps-proof-a","probe")
             cli_history=json.loads(datumctl("templates","history","probe"))
             if cli_history.get("templateUID")!=first["metadata"]["uid"] or len(cli_history.get("revisions",[]))!=2:
                 raise RuntimeError("datumctl history did not select the current template UID")
             diff=datumctl("templates","diff","probe","--revision",first_revision["metadata"]["name"])
             if "initial" not in diff or "updated" not in diff:
                 raise RuntimeError("datumctl diff did not show the expected current/revision definitions")
+            state_after_diff=project_snapshot("apps-proof-a","probe")
+            if state_after_diff!=state_before_diff:
+                raise RuntimeError("datumctl diff changed the full current object or revision list")
             before_restore_count=len(hist["items"])
+            state_before_restore_dry=project_snapshot("apps-proof-a","probe")
             datumctl("templates","restore","probe","--revision",first_revision["metadata"]["name"],"--dry-run=server")
-            code,after_dry=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
-            code,current=req(tpl+"/probe",tokens["author"],ctx=tls)
-            if code!=200 or len(after_dry.get("items",[]))!=before_restore_count or current["spec"].get("description")!="updated":
+            state_after_restore_dry=project_snapshot("apps-proof-a","probe")
+            if state_after_restore_dry!=state_before_restore_dry or state_after_restore_dry["object"]["spec"].get("description")!="updated" or len(state_after_restore_dry["revisions"])!=before_restore_count:
                 raise RuntimeError("datumctl restore dry-run changed persisted authoring or history")
             bprox=base+f"/apis/{PROJECT}/v1alpha1/projects/apps-proof-b/control-plane/apis/{GROUP}/v1alpha1"
             foreign_body={"apiVersion":f"{GROUP}/v1alpha1","kind":"AppTemplate","metadata":{"name":"foreign"},"spec":{"description":"foreign","inputSchema":{"type":"object","additionalProperties":False,"properties":{}},"components":[],"outputs":[]}}
             code,foreign=req(bprox+"/apptemplates",tokens["author"],"POST",foreign_body,ctx=tls)
             if code!=201:raise RuntimeError(f"foreign project template setup failed ({code})")
             code,foreign_history=req(bprox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            if code!=200:raise RuntimeError(f"foreign revision list failed ({code})")
             foreign_revision=next((r for r in foreign_history.get("items",[]) if r["spec"]["templateUID"]==foreign["metadata"]["uid"]),None)
             if foreign_revision is None:raise RuntimeError("foreign Project revision fixture missing")
+            state_before_foreign_restore=(project_snapshot("apps-proof-a","probe"),project_snapshot("apps-proof-b","foreign"))
             datumctl("templates","restore","probe","--revision",foreign_revision["metadata"]["name"],expected=1,error_contains="unavailable in this project")
-            code,after_foreign=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
-            if code!=200 or len(after_foreign.get("items",[]))!=before_restore_count:
-                raise RuntimeError("foreign Project revision changed current Project history")
+            state_after_foreign_restore=(project_snapshot("apps-proof-a","probe"),project_snapshot("apps-proof-b","foreign"))
+            if state_after_foreign_restore!=state_before_foreign_restore:
+                raise RuntimeError("denied foreign revision restore changed either Project's full object/history state")
             restored=datumctl("templates","restore","probe","--revision",first_revision["metadata"]["name"])
             restore_summary=json.loads(restored)
-            code,current=req(tpl+"/probe",tokens["author"],ctx=tls)
-            code,after_restore=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
-            latest=max(after_restore.get("items",[]),key=lambda r:r["spec"]["sequence"])
-            if code!=200 or len(after_restore.get("items",[]))!=before_restore_count+1 or restore_summary.get("action")!="restored" or current["spec"]!=first["spec"] or latest["spec"]["definition"]!=first["spec"]:
+            state_after_restore=project_snapshot("apps-proof-a","probe")
+            current=state_after_restore["object"]
+            after_restore=state_after_restore["revisions"]
+            latest=max(after_restore,key=lambda r:r["spec"]["sequence"])
+            if len(after_restore)!=before_restore_count+1 or restore_summary.get("action")!="restored" or current["spec"]!=first["spec"] or latest["spec"]["definition"]!=first["spec"]:
                 raise RuntimeError("datumctl restore did not accept the exact immutable definition")
             old_uid=current["metadata"]["uid"]; old_rv=current["metadata"]["resourceVersion"]
-            history_before_delete=len(after_restore.get("items",[]))
+            history_before_delete=len(after_restore)
+            state_before_delete_dry=project_snapshot("apps-proof-a","probe")
             datumctl("templates","delete","probe","--uid",old_uid,"--resource-version",old_rv,"--dry-run=server")
-            code,after_delete_dry=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
-            code,still_current=req(tpl+"/probe",tokens["author"],ctx=tls)
-            if code!=200 or still_current["metadata"]["uid"]!=old_uid or len(after_delete_dry.get("items",[]))!=history_before_delete:
-                raise RuntimeError("datumctl delete dry-run changed the current object or history")
+            state_after_delete_dry=project_snapshot("apps-proof-a","probe")
+            if state_after_delete_dry!=state_before_delete_dry or state_after_delete_dry["object"]["metadata"]["uid"]!=old_uid or len(state_after_delete_dry["revisions"])!=history_before_delete:
+                raise RuntimeError("datumctl delete dry-run changed the full current object or revision list")
             deleted=json.loads(datumctl("templates","delete","probe","--uid",old_uid,"--resource-version",old_rv))
             if deleted.get("uid")!=old_uid or deleted.get("action")!="deleted":raise RuntimeError("datumctl delete summary lost the deleted UID")
             gone_code,_=req(tpl+"/probe",tokens["author"],ctx=tls)
             history_code,retained=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
             old_history=json.loads(datumctl("templates","history","--uid",old_uid))
-            if gone_code!=404 or history_code!=200 or len(retained.get("items",[]))!=history_before_delete or old_history.get("templateUID")!=old_uid or len(old_history.get("revisions",[]))!=history_before_delete:
+            retained_items=retained.get("items",[])
+            retained_items.sort(key=lambda item:(item.get("metadata",{}).get("name",""),item.get("metadata",{}).get("uid","")))
+            expected_old_history=[{"name":r["metadata"]["name"],"sequence":r["spec"]["sequence"],"digest":r["spec"]["digest"],"actorUID":r["spec"]["effectiveActorUID"],"acceptedAt":r["spec"]["acceptedAt"]} for r in retained_items]
+            expected_old_history.sort(key=lambda row:row["sequence"])
+            cli_old_history=old_history.get("revisions",[])
+            cli_old_history.sort(key=lambda row:row.get("sequence",0))
+            if gone_code!=404 or history_code!=200 or retained_items!=state_after_restore["revisions"] or old_history.get("templateUID")!=old_uid or cli_old_history!=expected_old_history:
                 raise RuntimeError(f"datumctl delete/history mismatch (GET={gone_code}, list={history_code}, list items={len(retained.get('items',[]))}, CLI history items={len(old_history.get('revisions',[]))})")
             code,replacement=req(tpl,tokens["author"],"POST",body,ctx=tls)
             if code!=201 or replacement["metadata"]["uid"]==old_uid:raise RuntimeError("same-name template recreation did not get a fresh UID")
+            state_before_stale_delete=project_snapshot("apps-proof-a","probe")
             datumctl("templates","delete","probe","--uid",old_uid,"--resource-version",old_rv,expected=1,error_contains="changed or its name was reused")
-            code,recreated=req(tpl+"/probe",tokens["author"],ctx=tls)
-            if code!=200 or recreated["metadata"]["uid"]!=replacement["metadata"]["uid"]:
-                raise RuntimeError("stale delete after name reuse removed or changed the replacement")
+            state_after_stale_delete=project_snapshot("apps-proof-a","probe")
+            if state_after_stale_delete!=state_before_stale_delete or state_after_stale_delete["object"]["metadata"]["uid"]!=replacement["metadata"]["uid"]:
+                raise RuntimeError("stale delete after name reuse changed full replacement object/history state")
             old_history_again=json.loads(datumctl("templates","history","--uid",old_uid))
-            if len(old_history_again.get("revisions",[]))!=history_before_delete:
+            cli_old_history_again=old_history_again.get("revisions",[])
+            cli_old_history_again.sort(key=lambda row:row.get("sequence",0))
+            if old_history_again.get("templateUID")!=old_uid or cli_old_history_again!=expected_old_history:
                 raise RuntimeError("same-name recreation obscured old UID history")
             for rev in hist["items"]:
                 if rev["spec"]["projectUID"]!=puids["apps-proof-a"] or rev["spec"]["effectiveActorUID"]!="author-uid":raise RuntimeError("actor/project attribution mismatch")
