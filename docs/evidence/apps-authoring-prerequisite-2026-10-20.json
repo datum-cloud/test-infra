@@ -1,0 +1,61 @@
+{
+  "run_id": "apps-authoring-368e6c3c0b7f01da",
+  "source_revision": "sha1:e0833804a92384502b9124e80002621cb6bc7549",
+  "source_config_sha256": "533e10548a2076c520499d1467839d26485e0893cc15309ec283a76285cb8d1e",
+  "source_config_file_count": 23,
+  "apps_image": "ghcr.io/datum-labs/apps@sha256:6e6fa82647017fd80a3d15d62783b830a6664cbd990900b6f2afad191f110e28",
+  "apps_arm64_manifest": "sha256:bbe3a144888b0e5231f586bd94fcf76cad10f3129ab5685abbf70d7da78bacf2",
+  "apps_arm64_config": "sha256:be402edc785398f23497a8daab9e373fb79be4716c8c37260f37b2fabf1033f7",
+  "etcd_image": "registry.k8s.io/etcd:3.5.21-0@sha256:d58c035df557080a27387d687092e3fc2b64c6d0e3162dc51453a115f847d121",
+  "private_registry_image": "docker.io/library/registry@sha256:fa647fc1e5d5df7d8d923fb6332aab8e78783f8fca1a1394efb4011f68f5a793",
+  "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
+  "project_uids": {
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0",
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30"
+  },
+  "checks": [
+    "read-only preflight exact source/overlay, certificates, Projects and collision guards",
+    "private task-owned registry served exact PR14 config tree; digest pull hash matched",
+    "two dedicated random static-token Users installed with CAS; Milo API reloaded",
+    "task-owned direct Milo port-forward presents CA-verified 127.0.0.1 serving TLS",
+    "dedicated authority Milo RBAC allows/denies; actual Project GET and SAR; author unrelated-operation denials",
+    "Flux source and runtime Ready at exact pinned revision; two API replicas and etcd PVC Ready",
+    "dedicated author template/revision RBAC allows/denies after APIService registration",
+    "real Milo authoring/history/isolation; two new API pod UIDs retain history"
+  ],
+  "result": "pass",
+  "cleanup": "complete",
+  "published_oci_digest": "sha256:0ce05a8f6e8e4b75adfd1e0f6bc0eb394e898ddc5320407e1dcdf91a2b9938e8",
+  "observed_flux": {
+    "source_revision": "sha256:0ce05a8f6e8e4b75adfd1e0f6bc0eb394e898ddc5320407e1dcdf91a2b9938e8",
+    "runtime_revision": "sha256:0ce05a8f6e8e4b75adfd1e0f6bc0eb394e898ddc5320407e1dcdf91a2b9938e8",
+    "deployment_uid": "2628e196-0301-4487-9c46-2f2cb939998f",
+    "pvc_uid": "12fd2037-296a-4ea2-a23e-5bd447f712c0"
+  },
+  "observed_authoring": {
+    "template_uid": "5c149af0-5395-4c92-b910-42ee4cc1175a",
+    "revision_names": [
+      "5c149af0-5395-4c92-b910-42ee4cc1175a.8c4abf874f1984303a4b63f998f04716d14c75edf889080a36ca0c04ac36b383",
+      "5c149af0-5395-4c92-b910-42ee4cc1175a.cda1f35b3ad6002388740c8236e10e93ea5150f293a23b0187dd4e41a41ea440"
+    ],
+    "api_pod_image_ids_before": {
+      "d97d0477-00d3-4471-9ef8-a5add5950238": "docker.io/library/import-2026-10-21@sha256:6e6fa82647017fd80a3d15d62783b830a6664cbd990900b6f2afad191f110e28",
+      "21746149-c49f-42fa-93f4-78e54ed70970": "docker.io/library/import-2026-10-21@sha256:6e6fa82647017fd80a3d15d62783b830a6664cbd990900b6f2afad191f110e28"
+    },
+    "api_pod_image_ids_after": {
+      "e696136a-f027-4a70-935d-b427bd5468a2": "docker.io/library/import-2026-10-21@sha256:6e6fa82647017fd80a3d15d62783b830a6664cbd990900b6f2afad191f110e28",
+      "02fc53b8-f166-4529-9123-4c365ad682de": "docker.io/library/import-2026-10-21@sha256:6e6fa82647017fd80a3d15d62783b830a6664cbd990900b6f2afad191f110e28"
+    },
+    "http": {
+      "create": 201,
+      "duplicate": 409,
+      "update": 200,
+      "history": 200,
+      "other_project": 404,
+      "app_install_author_denied": 403,
+      "post_rollout_template": 200,
+      "post_rollout_history": 200
+    }
+  }
+}

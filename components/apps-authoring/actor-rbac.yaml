@@ -1,0 +1,38 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-template-author
+  labels:
+    apps-a1t.datum.net/fixture: apps-authoring
+rules:
+  - apiGroups:
+      - apps.miloapis.com
+    resources:
+      - apptemplates
+    verbs:
+      - get
+      - list
+      - create
+      - update
+  - apiGroups:
+      - apps.miloapis.com
+    resources:
+      - apptemplaterevisions
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-template-author
+  labels:
+    apps-a1t.datum.net/fixture: apps-authoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-template-author
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: apps-a1t-template-author

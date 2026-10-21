@@ -1,0 +1,14 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: apps-authoring-a1t
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 5m
+  insecure: true
+  url: oci://apps-a1t-registry.flux-system.svc.cluster.local:5000/apps-authoring
+  # The harness replaces this tag with the observed immutable sha256 digest
+  # before creating the object. It never reconciles a mutable tag.
+  ref:
+    tag: e0833804a92384502b9124e80002621cb6bc7549

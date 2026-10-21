@@ -1,0 +1,40 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-authoring-a1t-runtime
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 10m
+  # The test PVC and authoring history must survive removal of this Flux object.
+  # The harness handles teardown by exact UID after collecting non-secret evidence.
+  prune: false
+  # The harness validates Milo core before this reconcile, then suspends its
+  # own core reconciliation while a scoped static-token fixture is active.
+  sourceRef:
+    kind: OCIRepository
+    name: apps-authoring-a1t
+    namespace: flux-system
+  path: ./config/overlays/test-infra
+  healthChecks:
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: apps-serving-tls
+      namespace: apps-system
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: apps-etcd-server-tls
+      namespace: apps-system
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: apps-etcd-client-tls
+      namespace: apps-system
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: apps-etcd
+      namespace: apps-system
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: apps-authoring
+      namespace: apps-system
