@@ -26,6 +26,7 @@ from types import SimpleNamespace
 sys.dont_write_bytecode = True
 
 from apps_native_support import APIProxy, Commands, Kube, RUN_LABEL, private_file, require
+from apps_native_guard_quota import QuotaFixture
 
 
 MILO_SHA = "200de48a305732720377cb83308d57c84fd5f688"
@@ -131,7 +132,14 @@ def write_private_json(path: Path, document: dict) -> None:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(document, stream, separators=(",", ":"), sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
         private_file(path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -147,6 +155,13 @@ def create_private_json(path: Path, document: dict) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(document, stream, separators=(",", ":"), sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
     private_file(path)
 
 
@@ -532,6 +547,10 @@ def run_probe(args) -> dict:
         "cleanup": {"state": "not-started", "errors": []},
     }
     create_private_json(evidence_path, state)
+    quota = QuotaFixture(lambda *values: request(proxy, *values), args.project,
+                         project_identity["uid"], run_id, state,
+                         lambda: write_private_json(evidence_path, state),
+                         lambda: ensure_project_current(proxy, args.project, project_identity))
 
     def record_operation(verb: str, resource: str, status: int) -> None:
         state["operations"].append({"verb": verb, "resource": resource, "status": status})
@@ -546,6 +565,7 @@ def run_probe(args) -> dict:
                 "root Project API UID differs from bootstrap Project UID")
         require(get_optional(proxy, namespace_path) is None,
                 "run-randomized Namespace name already exists")
+        quota.prepare()
 
         namespace_doc = {
             "apiVersion": "v1", "kind": "Namespace",
@@ -713,7 +733,7 @@ def run_probe(args) -> dict:
         write_private_json(evidence_path, state)
         code = project_delete(proxy, args.project, project_identity, ordinary_path,
                               entry["uid"], current["metadata"]["resourceVersion"])
-        record_operation("DELETE_UID_RV", f"ConfigMap/{ordinary}", code)
+        record_operation("DELETE_UID_RV", f"ConfigMap/ordinary-{run_id}", code)
         wait_absent(proxy, ordinary_path, commands.deadline)
         entry["state"] = "absent"
         write_private_json(evidence_path, state)
@@ -729,6 +749,16 @@ def run_probe(args) -> dict:
         except Exception as error:
             cleanup_errors = [f"cleanup failed: {type(error).__name__}: {str(error)[:160]}"]
             state["cleanup"] = {"state": "incomplete", "errors": cleanup_errors}
+            write_private_json(evidence_path, state)
+    if proxy.process:
+        commands.deadline = time.monotonic() + 120
+        try:
+            quota.cleanup()
+        except Exception:
+            cleanup_errors.append("quota cleanup incomplete; exact grant intent retained")
+            if "quota" in state:
+                state["quota"]["cleanup"] = "incomplete"
+            state["cleanup"]["errors"] = cleanup_errors
             write_private_json(evidence_path, state)
     if proxy.process:
         proxy.close()
