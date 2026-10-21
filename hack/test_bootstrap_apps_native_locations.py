@@ -20,6 +20,17 @@ SPEC.loader.exec_module(locations)
 
 
 class LocationsBootstrapTest(unittest.TestCase):
+    def test_root_reconnect_failure_prevents_both_rbac_creates(self):
+        stage = mock.Mock()
+        with mock.patch.object(locations, "wait_authenticated_root",
+                               side_effect=RuntimeError("root not ready")), \
+                mock.patch.object(locations, "row_create") as create:
+            with self.assertRaisesRegex(RuntimeError, "root not ready"):
+                locations.create_root_rbac_after_reconnect(mock.Mock(), {}, {},
+                    Path("/tmp/no-evidence"), seconds=0.01, mark_stage=stage)
+        create.assert_not_called()
+        stage.assert_not_called()
+
     def test_source_pin_and_narrow_role_patches(self):
         root = Path(__file__).resolve().parent.parent / "components/locations"
         source = locations.yaml.safe_load((root / "source.yaml").read_text())
