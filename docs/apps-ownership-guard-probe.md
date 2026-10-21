@@ -1,5 +1,29 @@
 # Milo Apps ownership guard API probe
 
+The probe provisions an eight-unit native ConfigMap ResourceGrant in the
+selected Project API. The ordinary object and six PATCH seeds coexist, so a
+two-unit grant is insufficient. A grant in the root API does not supply this
+Project control plane's allowance. The fixture refuses pre-existing matching
+grants or claims, waits for the grant's observed Active generation and the
+quota controller's current bucket capacity, and never changes quota status.
+
+The grant intent and returned UID are saved in the private probe evidence
+before later assertions. Unknown responses can be recovered only from the exact
+prewritten payload; collisions and known-UID replacements cannot be adopted.
+After ConfigMap cleanup, the fixture waits for their native claims to clear,
+deletes only its own grant using UID/resourceVersion preconditions, and waits
+for that grant's bucket contribution to disappear. A separate 120-second
+cleanup deadline is available after ConfigMap cleanup. It leaves the quota
+controller's bucket object and the probe Namespace in place. Any ambiguous
+grant or incomplete cleanup retains evidence and fails the probe.
+
+Milo's quota consumer reference identifies the Project by name, not UID. The
+fixture rechecks the recorded live Project before creating quota, binds its
+intent to the Project's quota Namespace UID, and permits removal of its exact
+grant after the Project changes. This is a bounded test allowance, not durable
+App installation authority or cross-Project delegation. Native consumers,
+registration, claim creation and bucket reconciliation all remain active.
+
 `hack/test-apps-ownership-guard.py` verifies the published Milo #870 guard
 through the actual root Project API and the selected Project control-plane API.
 It only uses Kubernetes API requests through `kubectl proxy`; it does not read
