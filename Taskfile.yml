@@ -492,6 +492,9 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_catalog_installer.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_fixture_scope.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_fixture_scope.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/apps_native_vz_audit.py
+      - test -s {{.TASKFILE_DIR}}/hack/test_bootstrap_apps_native_vz_host.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_vz_host.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_bootstrap_apps_native_catalog_crds.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_catalog_crds.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_operator_flux.py
