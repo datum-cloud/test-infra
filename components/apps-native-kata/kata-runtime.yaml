@@ -1,0 +1,55 @@
+# This remote HelmRelease installs Kata on the already-created member Kind node.
+# It is intentionally not included in the default cluster composition.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: apps-a1t-kata-runtime
+  namespace: flux-system
+spec:
+  interval: 24h
+  releaseName: kata-deploy
+  targetNamespace: kube-system
+  chartRef:
+    kind: OCIRepository
+    name: apps-a1t-kata-deploy-chart
+    namespace: flux-system
+  kubeConfig:
+    secretRef:
+      name: apps-a1t-dfw-member-kubeconfig
+      key: kubeconfig
+  install:
+    remediation:
+      retries: 0
+  upgrade:
+    remediation:
+      retries: 0
+  values:
+    k8sDistribution: k8s
+    deploymentMode: daemonset
+    imagePullPolicy: IfNotPresent
+    image:
+      reference: quay.io/kata-containers/kata-deploy@sha256:f6009f18a602fc3b7a5439c5c3674b9dc083bb4a7ff78b4fbb0bb8c9e0b55b5f
+      tag: ""
+    kubectlImage:
+      reference: quay.io/kata-containers/kubectl@sha256:8180a25f399ba17de1dbcdf79d2760fcf25a95ec66d5500a0553ce5dab67b82b
+      tag: ""
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: ""
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+    shims:
+      disableAll: true
+      qemu:
+        enabled: true
+    defaultShim:
+      amd64: qemu
+      arm64: qemu
+    runtimeClasses:
+      enabled: true
+      createDefault: false
+    node-feature-discovery:
+      enabled: false
+    monitor:
+      enabled: false

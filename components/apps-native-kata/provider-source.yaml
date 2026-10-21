@@ -1,0 +1,10 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: apps-a1t-kata-provider
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: oci://ghcr.io/datum-labs/kata-provider-kustomize
+  ref:
+    digest: sha256:fcd3f95e3e5443e852c0c921863709e25b39bdae9aa1fad980d68c2a3ab0fbe4

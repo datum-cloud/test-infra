@@ -1,0 +1,75 @@
+# This source-owned Flux Kustomization deploys the actual Compute provider into
+# the member cell. The runtime HelmRelease below must be Ready first; Flux
+# Kustomization dependencies cannot depend on HelmRelease readiness.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-a1t-kata-provider
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 10m
+  prune: true
+  dependsOn:
+    - name: compute-a1t-dfw-cell
+      namespace: flux-system
+  sourceRef:
+    kind: OCIRepository
+    name: apps-a1t-kata-provider
+  path: ./overlays/cell
+  targetNamespace: kata-provider-system
+  kubeConfig:
+    secretRef:
+      name: apps-a1t-dfw-member-kubeconfig
+      key: kubeconfig
+  patches:
+    - target:
+        version: v1
+        kind: ConfigMap
+        name: kata-provider-config
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: kata-provider-config
+        data:
+          config.yaml: |
+            apiVersion: apiserver.config.datumapis.com/v1alpha1
+            kind: KataProvider
+            metricsServer:
+              bindAddress: ":8080"
+            webhookServer: {}
+            downstreamResourceManagement:
+              runtimeHandler: kata-qemu
+              nodeSelector:
+                katacontainers.io/kata-runtime: "true"
+              tolerations:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: NoSchedule
+              enableVPCNetworking: false
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: kata-provider
+      patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: kata-provider
+        spec:
+          template:
+            spec:
+              containers:
+                - name: manager
+                  image: ghcr.io/datum-labs/kata-provider@sha256:b51a24d99d97bb77ee94cea74a1313fcfd70c2caff98f2ad136f30d74369001c
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kata-provider
+      namespace: kata-provider-system
+    - apiVersion: node.k8s.io/v1
+      kind: RuntimeClass
+      name: kata-qemu

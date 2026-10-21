@@ -1,0 +1,36 @@
+{
+  "compute": {
+    "moduleVersion": "v0.12.10",
+    "sourceRevision": "88a7101c2b91f7195c2bb5433c50f54c384a90ce"
+  },
+  "kataProvider": {
+    "sourceRevision": "9578d304201428f6d7370460b4a6e9933ef1b25f",
+    "sourceVersion": "v0.1.10",
+    "bundle": "ghcr.io/datum-labs/kata-provider-kustomize@sha256:fcd3f95e3e5443e852c0c921863709e25b39bdae9aa1fad980d68c2a3ab0fbe4",
+    "managerIndex": "ghcr.io/datum-labs/kata-provider@sha256:b51a24d99d97bb77ee94cea74a1313fcfd70c2caff98f2ad136f30d74369001c",
+    "managerArm64": "sha256:b8e4741ebedc485ce7b7f01053ec8ca8f1e5f4e1abb2a7a97607c650b396d8b2"
+  },
+  "kataDeploy": {
+    "chartVersion": "4.1.0",
+    "chart": "quay.io/kata-containers/kata-deploy-charts/kata-deploy@sha256:33f102f6db70083de4fc8238af4439c4245a601bcb6a72e49bc80529098aefc0",
+    "imageIndex": "quay.io/kata-containers/kata-deploy@sha256:f6009f18a602fc3b7a5439c5c3674b9dc083bb4a7ff78b4fbb0bb8c9e0b55b5f",
+    "imageArm64": "sha256:85d4f55b0e8eeb945225c18e05bf0654090f91faff471be4346eea875f17773e",
+    "kubectlImageIndex": "quay.io/kata-containers/kubectl@sha256:8180a25f399ba17de1dbcdf79d2760fcf25a95ec66d5500a0553ce5dab67b82b",
+    "kubectlImageArm64": "sha256:0e272865cdf6b381364f58ce74a6e2ac0fddfc5625e8f384fcd4e4a3da8b0a1b"
+  },
+  "arm64": {
+    "handler": "kata-qemu",
+    "runtimeClass": "kata-qemu",
+    "nodeLabel": "katacontainers.io/kata-runtime=true",
+    "requiredHostDevice": "/dev/kvm",
+    "requiredHostModules": "/lib/modules"
+  },
+  "vmRuleSchema": {
+    "sourceChart": "victoria-metrics-k8s-stack",
+    "sourceChartVersion": "0.58.3",
+    "crd": "vmrules.operator.victoriametrics.com",
+    "apiVersion": "v1beta1",
+    "crdInputFile": "charts/victoria-metrics-operator/crd.yaml",
+    "crdInputFileSha256": "9a623ea333298d2e31d86ee48f97f080bdc58645892b1a4f4e643c112c6422e9"
+  }
+}
