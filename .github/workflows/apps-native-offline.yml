@@ -6,6 +6,13 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - hack/bootstrap-apps-native-catalog-crds.py
+      - hack/apps_native_operator_flux.py
+      - hack/test_bootstrap_apps_native_catalog_crds.py
+      - hack/test_apps_native_operator_flux.py
+      - components/service-catalog/api-crds.yaml
+      - components/service-catalog/billing-crds.yaml
+      - docs/apps-native-catalog-crds.md
       - hack/apps_native_fixture_scope.py
       - hack/bootstrap-apps-native-catalog-installer.py
       - hack/test_apps_native_fixture_scope.py
@@ -28,6 +35,13 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - hack/bootstrap-apps-native-catalog-crds.py
+      - hack/apps_native_operator_flux.py
+      - hack/test_bootstrap_apps_native_catalog_crds.py
+      - hack/test_apps_native_operator_flux.py
+      - components/service-catalog/api-crds.yaml
+      - components/service-catalog/billing-crds.yaml
+      - docs/apps-native-catalog-crds.md
       - hack/apps_native_fixture_scope.py
       - hack/bootstrap-apps-native-catalog-installer.py
       - hack/test_apps_native_fixture_scope.py
