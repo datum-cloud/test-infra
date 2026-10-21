@@ -1,0 +1,198 @@
+{
+  "run_id": "apps-compute-management-5a321fa4bba11e9d",
+  "source_revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+  "nso_crd_source_revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+  "compute_image": "ghcr.io/datum-cloud/compute@sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679",
+  "arm64_manifest": "sha256:d288691dee2c3935712fe70e3f4b43af063c16db27bd7bc9ab38b1951ec3ba77",
+  "arm64_config": "sha256:5d230dc6141ad919d653540d6a23ed2ac5b679622a1acbbb890d1f14a0bc98ae",
+  "identity_mode": "three static Milo RBAC Users and two distinct short-lived Karmada ServiceAccounts",
+  "project_uids": {
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0",
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30"
+  },
+  "checks": [
+    "offline exact source and live read-only prerequisite/collision preflight",
+    "hub CRD installer has only exact-name CRD change grants and passed denials",
+    "two remote Flux source bundles installed exact 16 hub CRD schemas",
+    "Karmada upstream ClusterRole bound only to fresh short-lived ServiceAccount",
+    "three distinct Milo Users and Karmada SA passed actual allow/deny probes before mounts"
+  ],
+  "preflight_seconds": 3.478,
+  "result": "fail",
+  "cleanup": "complete",
+  "partial_management_cleanup": [],
+  "observed_hub_crds": {
+    "revisions": {
+      "compute-a1t-controller": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "compute-a1t-hub-nso-source": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "compute-a1t-hub-compute-crds": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "compute-a1t-hub-nso-crds": "sha1:79245f00d6220c128df3d024475ff7b1566ce305"
+    },
+    "schema_hashes": {
+      "instanceconsolesessions.compute.datumapis.com": "d3107f43691590dbf0e60f7d3290021d03d00d18e8d71ec217d7ac5cf3fadb08",
+      "instances.compute.datumapis.com": "502505981f8fb8679fbd89ff8fca583213a8c408ddec4f7b4235225dd3b18f6f",
+      "instancetypes.compute.datumapis.com": "e82e80bddbdae1f4208651724fa55e3ea3895356283937c75cf873afcf8734a3",
+      "runtimeclasses.compute.datumapis.com": "abe8a33bd12096fca5f819db6bc8f12b69edf265b0f0e49a756ef289e95c3c5d",
+      "workloaddeployments.compute.datumapis.com": "1bdd66d483043b6374084670788de265e2f028d7a9be10b2195dead46004937c",
+      "workloads.compute.datumapis.com": "615e5bcd6d2e6e31b61bdb642599686f612f03a5f9caf2abd7cd9a27b36b9618",
+      "connectors.networking.datumapis.com": "e951743746e79b67c415bfc3b754ab62665a6c719f627f3fd01c59460e23a8fd",
+      "edgereachabilities.networking.datumapis.com": "dfe2384d5442028cbdfdcd06ca15ce2ad03e1c63fce204c9c0b1f23ccd382a18",
+      "httpproxies.networking.datumapis.com": "a03faa2b5a77373610ba9000c95b70f8eddaeee498cd42947e7e26ab90fa8c00",
+      "networkbindings.networking.datumapis.com": "2fb532967dc32881c399573465c66f93797a8b3af05ae4072b4d29c77268f31f",
+      "networkcontexts.networking.datumapis.com": "c9096bcc375aba957eb5c2ba9a2e99fbf28e2cf1c523eeb3b93743a826244afe",
+      "networkinterfaceclaims.networking.datumapis.com": "cd5252be09ecbabe9a8e355906955ffd6999204a57b6c87edaeccddea73b2696",
+      "networkinterfaces.networking.datumapis.com": "230cad6bcce1ae2ffff9a3a8cdb2e09f3868bb281aae0c6f6fbe8f5253c886d6",
+      "networks.networking.datumapis.com": "1ea0551a5479a2511f6f83c40674386900d4e02cc88408ad0460b7fd44d0c775",
+      "subnets.networking.datumapis.com": "c6f7bb5d8bcecfb4004af0e5e7bb400a702eb4cbe0d82aa1b058439baa516a82",
+      "trafficprotectionpolicies.networking.datumapis.com": "cb69b40a49158c1815580d67c767699f00e8e533da37bfd3d8d8ea56b19f0f2c"
+    },
+    "crd_uids": {
+      "instanceconsolesessions.compute.datumapis.com": "33cc3924-e91c-4757-a962-9aecf51fb274",
+      "instances.compute.datumapis.com": "d04cf463-354f-490b-a120-0edbd96e9d1f",
+      "instancetypes.compute.datumapis.com": "a950b429-bea1-4c88-8abe-7a73081628b9",
+      "runtimeclasses.compute.datumapis.com": "9e81917d-5e4c-4164-8ae7-0d2c007ee9ee",
+      "workloaddeployments.compute.datumapis.com": "a1a9aef2-7d4c-45cc-bb46-0ccc3b115277",
+      "workloads.compute.datumapis.com": "88566014-f6a2-4e87-bed1-3db4e122e79f",
+      "edgereachabilities.networking.datumapis.com": "83a83321-2588-40fe-8f5d-0db5ca73efbf",
+      "trafficprotectionpolicies.networking.datumapis.com": "6a6db1c9-86ea-473d-841b-893b6faa2a2e",
+      "httpproxies.networking.datumapis.com": "f50134b6-4ea8-472b-a275-869576d745ba",
+      "connectors.networking.datumapis.com": "cdf38d20-92c0-4fe4-8817-d52dbb860f88",
+      "networkbindings.networking.datumapis.com": "519db5ba-8a62-4e92-90ca-09c996393703",
+      "networkcontexts.networking.datumapis.com": "b4da468e-e572-4860-befb-3ce36041b247",
+      "networks.networking.datumapis.com": "f4f91cc3-95dd-4279-89d2-3be11e9212dc",
+      "networkinterfaceclaims.networking.datumapis.com": "16e19869-7561-4f8d-a8af-625923614dc4",
+      "networkinterfaces.networking.datumapis.com": "89cfb682-eb3e-4aa3-83ef-2649265bca19",
+      "subnets.networking.datumapis.com": "2b762648-1632-434e-8b91-1de82089336f"
+    }
+  },
+  "failure_diagnostics": {
+    "nso_source": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:79245f00d6220c128df3d024475ff7b1566ce305'"
+        },
+        {
+          "type": "ArtifactInStorage",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:79245f00d6220c128df3d024475ff7b1566ce305'"
+        }
+      ]
+    },
+    "compute_hub_crds": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "ReconciliationSucceeded",
+          "message": "Applied revision: sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce"
+        }
+      ]
+    },
+    "nso_hub_crds": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "ReconciliationSucceeded",
+          "message": "Applied revision: sha1:79245f00d6220c128df3d024475ff7b1566ce305"
+        }
+      ]
+    },
+    "compute_source": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce'"
+        },
+        {
+          "type": "ArtifactInStorage",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce'"
+        }
+      ]
+    },
+    "deployment": {
+      "desired": 2,
+      "ready": 0,
+      "available": 0
+    },
+    "management": {
+      "generation": 1,
+      "observed_generation": -1,
+      "revision": null,
+      "conditions": [
+        {
+          "type": "Reconciling",
+          "status": "True",
+          "reason": "Progressing",
+          "message": "Running health checks for revision sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce with a timeout of 5m0s"
+        },
+        {
+          "type": "Ready",
+          "status": "Unknown",
+          "reason": "Progressing",
+          "message": "Reconciliation in progress"
+        },
+        {
+          "type": "Healthy",
+          "status": "Unknown",
+          "reason": "Progressing",
+          "message": "Running health checks for revision sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce with a timeout of 5m0s"
+        }
+      ]
+    },
+    "pods": {
+      "items": [
+        {
+          "name": "compute-manager-9bc45786c-l9gbt",
+          "phase": "Pending",
+          "containers": [
+            {
+              "name": "manager",
+              "image_id": "",
+              "waiting_reason": "ContainerCreating",
+              "waiting_message": ""
+            }
+          ]
+        },
+        {
+          "name": "compute-manager-9bc45786c-ntbhm",
+          "phase": "Pending",
+          "containers": [
+            {
+              "name": "manager",
+              "image_id": "",
+              "waiting_reason": "ContainerCreating",
+              "waiting_message": ""
+            }
+          ]
+        }
+      ],
+      "total_count": 2
+    }
+  },
+  "startup_seconds": 155.457,
+  "hub_crds_absent_after_cleanup": true,
+  "cleanup_seconds": 240.89,
+  "total_seconds": 399.826
+}

@@ -1,0 +1,54 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: compute-a1t-dfw-cell
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  dependsOn:
+    - name: compute-a1t-management
+  sourceRef:
+    kind: GitRepository
+    name: compute-a1t-controller
+  path: ./config/overlays/cell
+  kubeConfig:
+    secretRef:
+      name: apps-a1t-dfw-member-kubeconfig
+      key: kubeconfig
+  images:
+    - name: ghcr.io/datum-cloud/compute
+      digest: sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679
+  # This test environment uses Milo's static-token/RBAC mode. Replace the
+  # upstream optional mTLS certificate + ConfigMap projection with the
+  # one-purpose quota kubeconfig Secret provisioned in this member cluster.
+  patches:
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: compute-manager
+      patch: |-
+        - op: test
+          path: /spec/template/spec/volumes/0/name
+          value: quota-credentials
+        - op: add
+          path: /spec/template/spec/securityContext/fsGroup
+          value: 65532
+        - op: replace
+          path: /spec/template/spec/volumes/0
+          value:
+            name: quota-credentials
+            secret:
+              secretName: compute-a1t-quota-kubeconfig
+              defaultMode: 0440
+              items:
+                - key: kubeconfig
+                  path: kubeconfig
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: compute-manager
+      namespace: compute-system

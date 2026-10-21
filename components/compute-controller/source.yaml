@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: compute-a1t-controller
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 5m
+  url: https://github.com/datum-cloud/compute.git
+  ref:
+    commit: 88a7101c2b91f7195c2bb5433c50f54c384a90ce
+  sparseCheckout:
+    - config

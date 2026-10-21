@@ -1,0 +1,8 @@
+Removed verified partial-apply ClusterRole compute UID adb9f4f1-371f-4251-a08b-f1acaa12e98e
+Removed verified partial-apply ClusterRole compute-metrics-auth-role UID bb584b0e-f6e0-4a17-80d2-317f2863948d
+Removed verified partial-apply ClusterRole compute-metrics-reader UID a1a08180-e3ff-41d8-979f-a1c2d90d8fde
+Removed verified partial-apply ClusterRole compute-workloaddeployment-editor-role UID 7b7bbf2b-d362-4743-a625-621711bcd911
+Removed verified partial-apply ClusterRole compute-workloaddeployment-viewer-role UID 28bd8286-c5a3-475d-aa05-d73713d4553d
+Removed verified partial-apply ClusterRole compute-workload-editor-role UID e6653a5e-8cc7-4ea1-97e9-bb86f5c3b9e8
+Removed verified partial-apply ClusterRole compute-workload-viewer-role UID 8e1fae09-cb03-4852-b56e-730da9f4ec7a
+PASS: all seven exact-source, Flux-labelled partial roles removed with UID/RV preconditions

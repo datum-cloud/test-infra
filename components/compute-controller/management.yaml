@@ -1,0 +1,220 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: compute-a1t-management
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  dependsOn:
+    - name: compute-a1t-milo-api-crds
+      namespace: milo-system
+    - name: compute-a1t-hub-compute-crds
+    - name: compute-a1t-hub-nso-crds
+  sourceRef:
+    kind: GitRepository
+    name: compute-a1t-controller
+  path: ./config/overlays/management-plane
+  images:
+    - name: ghcr.io/datum-cloud/compute
+      digest: sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679
+  # The upstream management overlay is the controller source of truth. These
+  # are the only omitted upstream resources: optional observability CRs and
+  # their generated JSON ConfigMaps, which this test cluster does not install.
+  patches:
+    - target:
+        group: resourcemetrics.miloapis.com
+        version: v1alpha1
+        kind: ResourceMetricsPolicy
+        name: compute-metrics
+      patch: |-
+        apiVersion: resourcemetrics.miloapis.com/v1alpha1
+        kind: ResourceMetricsPolicy
+        metadata:
+          name: compute-metrics
+        $patch: delete
+    - target:
+        group: grafana.integreatly.org
+        version: v1beta1
+        kind: GrafanaDashboard
+        name: compute-shell-sessions
+      patch: |-
+        apiVersion: grafana.integreatly.org/v1beta1
+        kind: GrafanaDashboard
+        metadata:
+          name: compute-shell-sessions
+        $patch: delete
+    - target:
+        group: grafana.integreatly.org
+        version: v1beta1
+        kind: GrafanaDashboard
+        name: compute-overview
+      patch: |-
+        apiVersion: grafana.integreatly.org/v1beta1
+        kind: GrafanaDashboard
+        metadata:
+          name: compute-overview
+        $patch: delete
+    - target:
+        group: operator.victoriametrics.com
+        version: v1beta1
+        kind: VMRule
+        name: compute-controller-alerts
+      patch: |-
+        apiVersion: operator.victoriametrics.com/v1beta1
+        kind: VMRule
+        metadata:
+          name: compute-controller-alerts
+        $patch: delete
+    - target:
+        group: operator.victoriametrics.com
+        version: v1beta1
+        kind: VMRule
+        name: compute-shell-session-alerts
+      patch: |-
+        apiVersion: operator.victoriametrics.com/v1beta1
+        kind: VMRule
+        metadata:
+          name: compute-shell-session-alerts
+        $patch: delete
+    - target:
+        version: v1
+        kind: ConfigMap
+        name: compute-shell-sessions-dashboard
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: compute-shell-sessions-dashboard
+        $patch: delete
+    - target:
+        version: v1
+        kind: ConfigMap
+        name: compute-overview-dashboard
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: compute-overview-dashboard
+        $patch: delete
+    # The management deployment needs a real Karmada-hub credential because
+    # PR32 keeps the hub in a separate cluster. The mounted Secret is provisioned
+    # by the isolated test bootstrap and is never copied from either cluster's
+    # administrator kubeconfig.
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: compute-manager
+      patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: compute-manager
+        spec:
+          template:
+            spec:
+              securityContext:
+                fsGroup: 65532
+              volumes:
+                - name: downstream-kubeconfig
+                  configMap: null
+                  secret:
+                    secretName: compute-a1t-karmada-kubeconfig
+                    defaultMode: 0440
+                    items:
+                      - key: kubeconfig
+                        path: downstream-kubeconfig.yaml
+                - name: karmada-token
+                  $patch: delete
+                - name: milo-discovery-credentials
+                  secret:
+                    secretName: compute-a1t-milo-discovery-kubeconfig
+                    defaultMode: 0440
+                    items:
+                      - key: kubeconfig
+                        path: kubeconfig
+                - name: milo-project-credentials
+                  secret:
+                    secretName: compute-a1t-milo-project-kubeconfig
+                    defaultMode: 0440
+                    items:
+                      - key: kubeconfig
+                        path: kubeconfig
+                - name: quota-credentials
+                  secret:
+                    secretName: compute-a1t-quota-kubeconfig
+                    defaultMode: 0440
+                    items:
+                      - key: kubeconfig
+                        path: kubeconfig
+              containers:
+                - name: manager
+                  volumeMounts:
+                    - mountPath: /etc/kubernetes/karmada-token
+                      $patch: delete
+                    - name: milo-discovery-credentials
+                      mountPath: /etc/milo-discovery
+                      readOnly: true
+                    - name: milo-project-credentials
+                      mountPath: /etc/milo-project
+                      readOnly: true
+                    - name: quota-credentials
+                      mountPath: /etc/quota-credentials
+                      readOnly: true
+    # Compute's source CSI component deliberately leaves issuer selection to
+    # the consumer. This fixture provisions a task-owned CA Issuer below.
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: compute-manager
+      patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: compute-manager
+        spec:
+          template:
+            spec:
+              volumes:
+                - name: webhook-server-tls
+                  csi:
+                    volumeAttributes:
+                      csi.cert-manager.io/issuer-kind: Issuer
+                      csi.cert-manager.io/issuer-name: compute-a1t-webhook-ca
+    - target:
+        version: v1
+        kind: ConfigMap
+        name: compute-config
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: compute-config
+        data:
+          config.yaml: |
+            apiVersion: apiserver.config.datumapis.com/v1alpha1
+            kind: WorkloadOperator
+            metricsServer:
+              bindAddress: "0"
+            webhookServer: {}
+            discovery:
+              mode: milo
+              clusterName: apps-a1t-pop-dfw-20261020
+              discoveryKubeconfigPath: /etc/milo-discovery/kubeconfig
+              projectKubeconfigPath: /etc/milo-project/kubeconfig
+              quotaKubeconfigPath: /etc/quota-credentials/kubeconfig
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: compute-manager
+      namespace: compute-system
+    - apiVersion: admissionregistration.k8s.io/v1
+      kind: MutatingWebhookConfiguration
+      name: compute-mutating
+    - apiVersion: admissionregistration.k8s.io/v1
+      kind: ValidatingWebhookConfiguration
+      name: compute-validating
