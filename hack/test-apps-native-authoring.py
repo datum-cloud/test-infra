@@ -85,6 +85,29 @@ PRECISION_CANONICAL = (
 )
 PRECISION_DIGEST = "sha256:c0f3fc1db9b5ea79b660a4809a126055cd364980439e2746f8fdc155562274c7"
 
+
+def write_evidence(path: Path, evidence: dict) -> None:
+    """Replace the private recovery journal only after durable complete JSON."""
+    require(path.is_file() and not path.is_symlink(),
+            "private Apps evidence file changed before journal write")
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(evidence, output, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        parent = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def load_yaml(path: Path) -> list[dict]:
     return [item for item in yaml.safe_load_all(path.read_text()) if item]
 
@@ -886,20 +909,45 @@ def compare_history(first: dict, second: dict) -> None:
     require(a == b, "immutable revision content changed across Apps replica rollout")
 
 
+def create_fixture_template(args, state: dict, tokens: dict, ca_file: Path,
+                            project: str, fixture: dict, evidence: dict,
+                            evidence_file: Path) -> dict:
+    """Journal each create intent and returned UID before testing admission output.
+
+    A lost response leaves only an intent, never an adopted UID. Cleanup then
+    retains uncertain data for explicit review instead of guessing ownership.
+    """
+    name = fixture["metadata"]["name"]
+    intent = {"project": project, "project_uid": state["projects"][project],
+              "name": name, "digest": fixture["spec"]["digest"],
+              "phase": "post-started", "uid": None}
+    evidence.setdefault("template_create_intents", []).append(intent)
+    write_evidence(evidence_file, evidence)
+    created = must_http(args.direct_milo_port, ca_file, tokens[AUTHOR], "POST",
+                        project_path(project, "apptemplates"), 201, fixture)
+    meta = created.get("metadata", {})
+    require(meta.get("name") == name and isinstance(meta.get("uid"), str) and
+            meta["uid"], "template create returned no exact name/UID")
+    intent.update({"phase": "created-response", "uid": meta["uid"]})
+    state["allowed_template_uids"][meta["uid"]] = name
+    write_evidence(evidence_file, evidence)
+    return created
+
+
 def test_authoring(args, state: dict, tokens: dict, ca_file: Path,
-                   lease: Owned, host_proxy: APIProxy, record) -> dict:
+                   lease: Owned, host_proxy: APIProxy, record,
+                   evidence: dict, evidence_file: Path) -> dict:
     port = args.direct_milo_port
     author = tokens[AUTHOR]
     project = PROJECTS[1]
-    path = project_path(project, "apptemplates")
-    created = must_http(port, ca_file, author, "POST", path, 201,
-                        template_object(TEMPLATE_NAME, "native-one"))
-    state["allowed_template_uids"][created["metadata"]["uid"]] = TEMPLATE_NAME
+    created = create_fixture_template(args, state, tokens, ca_file, project,
+                                      template_object(TEMPLATE_NAME, "native-one"),
+                                      evidence, evidence_file)
     require(created["metadata"].get("uid") and
             created["metadata"].get("annotations", {}).get(
                 "apps.miloapis.com/change-actor-uid") == AUTHOR and
             created["metadata"]["annotations"].get(
-                "apps.miloapis.com/project-uid") == state["projects"][project] and
+                "apps.miloapis.com/authoring-project-uid") == state["projects"][project] and
             created["metadata"]["annotations"].get(
                 "apps.miloapis.com/change-generation") == "1" and
             "apps.miloapis.com/template-history" in created["metadata"].get("finalizers", []),
@@ -1068,7 +1116,8 @@ def post_admission(args, state: dict, tokens: dict, ca_file: Path,
 
 
 def delete_history_test(args, state: dict, tokens: dict, ca_file: Path, prior: dict,
-                        record, cli: AppsCLI | None = None) -> dict:
+                        record, evidence: dict, evidence_file: Path,
+                        cli: AppsCLI | None = None) -> dict:
     port, author, project = args.direct_milo_port, tokens[AUTHOR], PROJECTS[1]
     path = project_path(project, "apptemplates", TEMPLATE_NAME)
     old_uid = prior["template"]["metadata"]["uid"]
@@ -1098,10 +1147,9 @@ def delete_history_test(args, state: dict, tokens: dict, ca_file: Path, prior: d
     retained = revision_list(port, ca_file, author, project)
     require({item["metadata"]["name"] for item in retained} == old_revisions,
             "template deletion erased immutable history")
-    replacement = must_http(port, ca_file, author, "POST",
-                            project_path(project, "apptemplates"), 201,
-                            template_object(TEMPLATE_NAME, "replacement-uid"))
-    state["allowed_template_uids"][replacement["metadata"]["uid"]] = TEMPLATE_NAME
+    replacement = create_fixture_template(
+        args, state, tokens, ca_file, project,
+        template_object(TEMPLATE_NAME, "replacement-uid"), evidence, evidence_file)
     require(replacement["metadata"]["uid"] != old_uid,
             "same-name replacement did not receive a fresh API UID")
     accepted = wait_template(port, ca_file, author, project, TEMPLATE_NAME, 1)
@@ -1129,7 +1177,8 @@ def delete_history_test(args, state: dict, tokens: dict, ca_file: Path, prior: d
             "revision_names": sorted(item["metadata"]["name"] for item in after)}
 
 
-def precision_test(args, state: dict, tokens: dict, ca_file: Path, record) -> dict:
+def precision_test(args, state: dict, tokens: dict, ca_file: Path, record,
+                   evidence: dict, evidence_file: Path) -> dict:
     port, author, project = args.direct_milo_port, tokens[AUTHOR], PROJECTS[1]
     path = project_path(project, "apptemplates")
     invalid = precision_object()
@@ -1141,9 +1190,9 @@ def precision_test(args, state: dict, tokens: dict, ca_file: Path, record) -> di
     must_http(port, ca_file, author, "GET",
               project_path(project, "apptemplates", PRECISION_NAME), 404)
     fixture = precision_object()
-    created = must_http(port, ca_file, author, "POST", path, 201, fixture)
+    created = create_fixture_template(args, state, tokens, ca_file, project,
+                                      fixture, evidence, evidence_file)
     uid = created["metadata"]["uid"]
-    state["allowed_template_uids"][uid] = PRECISION_NAME
     accepted = wait_template(port, ca_file, author, project, PRECISION_NAME, 1)
     revision = must_http(port, ca_file, author, "GET",
                          project_path(project, "apptemplaterevisions",
@@ -1236,15 +1285,21 @@ def remove_owned_data(milo_proxy: APIProxy, initial_projects: dict[str, str],
     # each object, and any newly discovered foreign object aborts cleanup.
     census = census_owned_data(milo_proxy, initial_projects, allowed_template_uids)
     for project, found in census.items():
-        templates = found["templates"]
-        revisions = found["revisions"]
-        for obj in templates:
+        for obj in found["templates"]:
             meta = obj["metadata"]
             milo_proxy.delete(project_path(project, "apptemplates", meta["name"]),
                               meta["uid"], meta["resourceVersion"])
         wait_for(lambda: not resource_empty(milo_proxy, project, "apptemplates"),
                  f"owned templates absent in {project}", 90)
-        for obj in revisions:
+    # DELETE may release the finalizer only after the controller materializes
+    # pending immutable history. Re-census all Project scopes after templates
+    # disappear and refuse any newly materialized foreign revision.
+    after_templates = census_owned_data(milo_proxy, initial_projects,
+                                        allowed_template_uids)
+    require(all(not found["templates"] for found in after_templates.values()),
+            "authoring templates appeared after deletion; retaining CRDs")
+    for project, found in after_templates.items():
+        for obj in found["revisions"]:
             meta = obj["metadata"]
             milo_proxy.delete(project_path(project, "apptemplaterevisions", meta["name"]),
                               meta["uid"], meta["resourceVersion"])
@@ -1365,7 +1420,7 @@ def cleanup(args, commands: Commands, state: dict, refs: dict[str, list[Owned]],
         evidence["cleanup_actions"] = evidence.get("cleanup_actions", [])
         evidence["cleanup"] = "complete" if not errors else "incomplete"
         evidence["cleanup_errors"] = errors
-        private_write(evidence_file, json.dumps(evidence, indent=2) + "\n")
+        write_evidence(evidence_file, evidence)
     return errors
 
 
@@ -1416,7 +1471,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
         evidence["datumctl_checks"] = []
     def record(check: str) -> None:
         evidence["checks"].append(check)
-        private_write(evidence_file, json.dumps(evidence, indent=2) + "\n")
+        write_evidence(evidence_file, evidence)
         print(f"PASS: {check}", flush=True)
 
     host, milo = state["host"], state["milo"]
@@ -1587,7 +1642,8 @@ def execute(args, commands: Commands, state: dict, source: dict,
         authorization_probes(scoped_configs, commands, author_enabled=True)
         evidence["discovery"] = check_discovery(args.direct_milo_port, ca_file, tokens[AUTHOR])
         record("root Milo Flux installed only source-owned fail-closed WCs with verified public CA")
-        prior = test_authoring(args, state, tokens, ca_file, lease_ref, host_proxy, record)
+        prior = test_authoring(args, state, tokens, ca_file, lease_ref, host_proxy,
+                               record, evidence, evidence_file)
         bad_ca_probe(args, milo, private, tokens, ca_file, app_ca, state["milo_ca"])
         record("wrong public CA rejected a named webhook TLS request; exact CA restored")
         history = post_admission(args, state, tokens, ca_file, host, prior, record)
@@ -1615,12 +1671,14 @@ def execute(args, commands: Commands, state: dict, source: dict,
                 result["template"], result["revisions"])
             evidence["datumctl_checks"] = result["checks"]
             record("exported datumctl history/diff/dry-run and exact-definition restore used real Project API")
-        deletion = delete_history_test(args, state, tokens, ca_file, history, record, cli)
+        deletion = delete_history_test(args, state, tokens, ca_file, history,
+                                       record, evidence, evidence_file, cli)
         if cli is not None:
             evidence["datumctl_checks"].extend(
                 ["server-dry-run-delete", "uid-rv-delete", "history-after-delete"])
             record("exported datumctl UID/RV delete retained immutable history by UID")
-        precision = precision_test(args, state, tokens, ca_file, record)
+        precision = precision_test(args, state, tokens, ca_file, record,
+                                   evidence, evidence_file)
         evidence["history"] = {"template_uids": [deletion["original_uid"],
                                                   deletion["replacement_uid"],
                                                   precision["template_uid"]],
@@ -1632,7 +1690,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
     except Exception as exc:
         primary_error = exc
         evidence["failure"] = str(exc)[:900]
-        private_write(evidence_file, json.dumps(evidence, indent=2) + "\n")
+        write_evidence(evidence_file, evidence)
         print(f"FAIL: {evidence['failure']}; starting bounded cleanup", flush=True)
         evidence["failure_diagnostics"] = diagnostics(host)
     finally:
@@ -1645,7 +1703,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
         evidence["result"] = "pass" if primary_error is None and not cleanup_errors else "fail"
         if primary_error is not None:
             evidence["failure"] = str(primary_error)[:900]
-        private_write(evidence_file, json.dumps(evidence, indent=2) + "\n")
+        write_evidence(evidence_file, evidence)
         print(f"Non-secret native Apps evidence: {evidence_file}", flush=True)
     require(primary_error is None and not cleanup_errors,
             f"native Apps trial failed: {primary_error}; cleanup: {cleanup_errors}")
