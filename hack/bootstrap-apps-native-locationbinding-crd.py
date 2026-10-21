@@ -26,6 +26,7 @@ import yaml
 from apps_native_support import APIProxy, Commands, Kube, RUN_LABEL, private_file, ready, require, wait_for
 from apps_native_operator_flux import create_stage, delete_stage
 from apps_native_fixture_scope import active_catalog_installer, require_same_identity, scope_identity
+from apps_native_catalog_oci import transition_contract as catalog_oci_contract, verified_live_transition
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -173,7 +174,8 @@ def manifests(commands: Commands, revision: str, run_id: str) -> dict:
 
 def live_dependencies(host: Kube, milo: Kube, identity: dict, installer_path: Path,
                       catalog_api_path: Path,
-                      locations_path: Path) -> tuple[dict, dict, dict]:
+                      locations_path: Path, transition_path: Path,
+                      oci_contract: dict) -> tuple[dict, dict, dict, dict]:
     require(not locations_path.is_symlink(), "Locations journal symlink refused")
     private_file(locations_path)
     locations = json.loads(locations_path.read_text())
@@ -203,24 +205,13 @@ def live_dependencies(host: Kube, milo: Kube, identity: dict, installer_path: Pa
             catalog_api.get("scope_identity") == identity and
             catalog_api.get("installer_run_id") == installer["run_id"],
             "active source-owned Catalog API graph required")
-    source = host.json("-n", "flux-system", "get", "gitrepository", "service-catalog")
-    billing_source = host.json("-n", "flux-system", "get", "ocirepository", "catalog-billing")
-    api = host.json("-n", "milo-system", "get", "kustomization", "service-catalog-api-crds")
-    billing_api = host.json("-n", "milo-system", "get", "kustomization",
-                            "service-catalog-billing-crds")
-    require(source.get("spec", {}).get("ref") == {"commit": CATALOG_SHA} and
-            source.get("status", {}).get("artifact", {}).get("revision") == "sha1:" + CATALOG_SHA and
-            source["metadata"].get("uid") == catalog_api.get("attempted", {}).get(
-                "flux-system/service-catalog") and
-            api["metadata"].get("uid") == catalog_api.get("attempted", {}).get(
-                "milo-system/service-catalog-api-crds") and
-            billing_source["metadata"].get("uid") == catalog_api.get("attempted", {}).get(
-                "flux-system/catalog-billing") and
-            billing_source.get("status", {}).get("artifact", {}).get("revision") == BILLING_DIGEST and
-            billing_api["metadata"].get("uid") == catalog_api.get("attempted", {}).get(
-                "milo-system/service-catalog-billing-crds") and
-            ready(source) and ready(api) and ready(billing_source) and ready(billing_api),
-            "source-owned Catalog API graph is not current")
+    require(not transition_path.is_symlink(), "Catalog OCI transition journal symlink refused")
+    private_file(transition_path)
+    transition = json.loads(transition_path.read_text())
+    require(transition.get("locations_run_id") == locations.get("run_id"),
+            "Catalog OCI transition does not bind the retained Locations run")
+    verified_live_transition(host, identity, oci_contract, catalog_api, transition)
+    billing_predecessor(host, catalog_api)
     host_stage = host.json("-n", "flux-system", "get", "kustomization",
                            "apps-a1t-locations-host")
     cls = milo.json("get", "locationclass.locations.miloapis.com", "datum-managed")
@@ -235,7 +226,26 @@ def live_dependencies(host: Kube, milo: Kube, identity: dict, installer_path: Pa
             loc["metadata"].get("uid") == locations.get("attempted", {}).get("location") and
             fresh_condition(cls, "Accepted") and fresh_condition(loc, "Ready"),
             "live source-owned Locations readiness prerequisite changed")
-    return installer, catalog_api, locations
+    return installer, catalog_api, locations, transition
+
+
+def billing_predecessor(host: Kube, catalog_api: dict) -> None:
+    """Report fixed, noncredential predicate names on a predecessor mismatch."""
+    source = host.json("-n", "flux-system", "get", "ocirepository", "catalog-billing")
+    stage = host.json("-n", "milo-system", "get", "kustomization",
+                      "service-catalog-billing-crds")
+    checks = {
+        "source_uid": source.get("metadata", {}).get("uid") ==
+            catalog_api.get("attempted", {}).get("flux-system/catalog-billing"),
+        "source_digest": source.get("status", {}).get("artifact", {}).get("revision") ==
+            BILLING_DIGEST,
+        "source_ready_current": ready(source),
+        "stage_uid": stage.get("metadata", {}).get("uid") ==
+            catalog_api.get("attempted", {}).get("milo-system/service-catalog-billing-crds"),
+        "stage_ready_current": ready(stage),
+    }
+    require(all(checks.values()), "source-owned Catalog Billing predecessor changed: " +
+            json.dumps(checks, sort_keys=True, separators=(",", ":")))
 
 
 def inventory_preflight(host: Kube, milo: Kube) -> None:
@@ -311,17 +321,25 @@ def delete_owned(cluster: Kube, proxy: APIProxy, key: str, manifest: dict,
 
 
 def installer_probe_config(host: Kube, identity: dict, private: Path,
-                           milo_port: int) -> tuple[Path, Path]:
+                           milo_port: int) -> tuple[Path, Path, str]:
     secret = host.json("-n", "milo-system", "get", "secret",
                        "apps-a1t-catalog-installer-kubeconfig")
     config = yaml.safe_load(base64.b64decode(
         secret["data"]["kubeconfig"], validate=True))
-    require(config.get("current-context") == "milo" and
+    require(config.get("current-context") == "catalog-installer" and
             len(config.get("clusters", [])) == 1 and
+            len(config.get("contexts", [])) == 1 and
             len(config.get("users", [])) == 1,
             "scoped Catalog installer config shape changed")
+    require(config["contexts"][0] == {"name": "catalog-installer",
+            "context": {"cluster": "milo", "user": "apps-a1t-catalog-installer"}} and
+            config["clusters"][0].get("name") == "milo" and
+            config["users"][0].get("name") == "apps-a1t-catalog-installer" and
+            set(config["users"][0].get("user", {})) == {"token"},
+            "scoped Catalog installer context or user changed")
     settings = config["clusters"][0]["cluster"]
-    require(settings.get("server") == "https://milo-apiserver.milo-system.svc:6443" and
+    require(settings.get("server") ==
+            "https://milo-apiserver.milo-system.svc.cluster.local:6443" and
             hashlib.sha256(base64.b64decode(
                 settings["certificate-authority-data"], validate=True)).hexdigest() ==
             identity["milo"]["ca_sha256"] and
@@ -336,19 +354,32 @@ def installer_probe_config(host: Kube, identity: dict, private: Path,
         probe_path.unlink(missing_ok=True)
         probe_dir.rmdir()
         raise
-    return probe_dir, probe_path
+    return probe_dir, probe_path, config["current-context"]
 
 
-def authorization_probes(probe: Kube) -> None:
+def authorization_probes(probe: Kube, record=None) -> None:
+    def check(verb: str, resource: str, expected: bool,
+              name: str | None = None) -> None:
+        operation = {"verb": verb, "resource": resource, "expected": expected,
+                     "name": name}
+        if record is not None:
+            record({**operation, "state": "started"})
+        if name is None:
+            probe.can_i(verb, resource, expected)
+        else:
+            probe.can_i(verb, resource, expected, name)
+        if record is not None:
+            record({**operation, "state": "passed"})
+
     for verb in ("get", "patch", "update", "delete"):
-        probe.can_i(verb, "customresourcedefinitions.apiextensions.k8s.io", True,
-                    CRD_NAME)
-        probe.can_i(verb, "customresourcedefinitions.apiextensions.k8s.io", False,
-                    "foreign.networking.datumapis.com")
+        check(verb, "customresourcedefinitions.apiextensions.k8s.io", True,
+              CRD_NAME)
+        check(verb, "customresourcedefinitions.apiextensions.k8s.io", False,
+              "foreign.networking.datumapis.com")
     for verb, resource in (("get", "secrets"),
                            ("create", "clusterroles.rbac.authorization.k8s.io"),
                            ("impersonate", "users")):
-        probe.can_i(verb, resource, False)
+        check(verb, resource, False)
 
 
 def no_locationbindings(milo: Kube) -> None:
@@ -518,6 +549,9 @@ def run(args: argparse.Namespace) -> None:
     commands = Commands()
     commands.deadline = time.monotonic() + args.deadline_seconds
     revision = clean_revision(commands)
+    oci_contract = catalog_oci_contract(commands, args.catalog_source,
+                                        args.catalog_oci_manifest,
+                                        args.catalog_oci_layer)
     if args.cleanup:
         private_file(args.evidence_file)
         evidence = json.loads(args.evidence_file.read_text())
@@ -528,14 +562,16 @@ def run(args: argparse.Namespace) -> None:
     host = Kube(commands, args.host_kubeconfig, args.host_context)
     milo = Kube(commands, args.milo_kubeconfig, "milo-root")
     identity = scope_identity(host, milo, args.host_context, args.milo_port)
-    installer, catalog_api, locations = live_dependencies(
+    installer, catalog_api, locations, transition = live_dependencies(
         host, milo, identity, args.installer_evidence_file,
-        args.catalog_api_evidence_file, args.locations_evidence_file)
+        args.catalog_api_evidence_file, args.locations_evidence_file,
+        args.catalog_oci_evidence_file, oci_contract)
     if args.cleanup:
         require(evidence.get("source_revision") == revision and
                 evidence.get("nso_revision") == NSO_SHA and
                 evidence.get("installer_run_id") == installer["run_id"] and
                 evidence.get("catalog_api_run_id") == catalog_api["run_id"] and
+                evidence.get("catalog_oci_run_id") == transition["run_id"] and
                 evidence.get("locations_run_id") == locations["run_id"] and
                 evidence.get("host_context") == args.host_context and
                 evidence.get("milo_port") == args.milo_port and
@@ -555,6 +591,7 @@ def run(args: argparse.Namespace) -> None:
                 "host_context": args.host_context, "milo_port": args.milo_port,
                 "scope_identity": identity, "installer_run_id": installer["run_id"],
                 "catalog_api_run_id": catalog_api["run_id"],
+                "catalog_oci_run_id": transition["run_id"],
                 "locations_run_id": locations["run_id"],
                 "webhook_uids": webhook_uids,
                 "attempted": {}, "intents": {}, "flux_stages": {},
@@ -567,12 +604,15 @@ def run(args: argparse.Namespace) -> None:
         stage("supplemental-role")
         create_owned(milo, "role", manifest_set["role"], evidence, args.evidence_file)
         create_owned(milo, "binding", manifest_set["binding"], evidence, args.evidence_file)
-        stage("installer-authorization-probes")
-        probe_dir, probe_path = installer_probe_config(host, identity,
-                                                       args.evidence_file.parent,
-                                                       args.milo_port)
+        stage("installer-probe-config")
+        probe_dir, probe_path, probe_context = installer_probe_config(
+            host, identity, args.evidence_file.parent, args.milo_port)
         try:
-            authorization_probes(Kube(commands, probe_path, "milo"))
+            stage("installer-authorization-probes")
+            def record_probe(operation: dict) -> None:
+                evidence["authorization_probe"] = operation
+                atomic_json(args.evidence_file, evidence)
+            authorization_probes(Kube(commands, probe_path, probe_context), record_probe)
         finally:
             probe_path.unlink(missing_ok=True)
             probe_dir.rmdir()
@@ -625,6 +665,10 @@ def main() -> None:
     parser.add_argument("--milo-port", required=True, type=int)
     parser.add_argument("--installer-evidence-file", required=True, type=Path)
     parser.add_argument("--catalog-api-evidence-file", required=True, type=Path)
+    parser.add_argument("--catalog-oci-evidence-file", required=True, type=Path)
+    parser.add_argument("--catalog-source", required=True, type=Path)
+    parser.add_argument("--catalog-oci-manifest", required=True, type=Path)
+    parser.add_argument("--catalog-oci-layer", required=True, type=Path)
     parser.add_argument("--locations-evidence-file", required=True, type=Path)
     parser.add_argument("--evidence-file", required=True, type=Path)
     parser.add_argument("--deadline-seconds", type=int, default=900)

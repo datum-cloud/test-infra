@@ -1,0 +1,11 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: apps-a1t-catalog-bundle
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: oci://ghcr.io/milo-os/service-catalog-kustomize
+  ref:
+    # Upstream publication v0.0.0-5f2b663, full source SHA in OCI annotation.
+    digest: sha256:d34680228b91a5a5d46fedb40700f805b9b2ce97f13232e178cffa2db2cae431

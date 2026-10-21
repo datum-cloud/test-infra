@@ -4,6 +4,7 @@ import copy
 import base64
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import stat
 import tempfile
@@ -17,9 +18,88 @@ SOURCE = Path(__file__).with_name("bootstrap-apps-native-locationbinding-crd.py"
 spec = importlib.util.spec_from_file_location("locationbinding_fixture", SOURCE)
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
+INSTALLER_SOURCE = Path(__file__).with_name("bootstrap-apps-native-catalog-installer.py")
+installer_spec = importlib.util.spec_from_file_location("catalog_installer_source", INSTALLER_SOURCE)
+installer_source = importlib.util.module_from_spec(installer_spec)
+installer_spec.loader.exec_module(installer_source)
 
 
 class RenderContractTests(unittest.TestCase):
+    def test_billing_predecessor_reports_only_fixed_predicates(self):
+        expected_source_uid = "source-uid"
+        expected_stage_uid = "stage-uid"
+        source = {"metadata": {"uid": expected_source_uid, "generation": 2},
+                  "status": {"observedGeneration": 2,
+                             "artifact": {"revision": fixture.BILLING_DIGEST},
+                             "conditions": [{"type": "Ready", "status": "True",
+                                             "observedGeneration": 2}]}}
+        stage = {"metadata": {"uid": expected_stage_uid, "generation": 3},
+                 "status": {"observedGeneration": 3,
+                            "conditions": [{"type": "Ready", "status": "True",
+                                            "observedGeneration": 3}]}}
+        class Host:
+            def json(self, *args):
+                return source if args[-1] == "catalog-billing" else stage
+        journal = {"attempted": {"flux-system/catalog-billing": expected_source_uid,
+                                 "milo-system/service-catalog-billing-crds":
+                                     expected_stage_uid}}
+        fixture.billing_predecessor(Host(), journal)
+        source["status"]["observedGeneration"] = 1
+        source["metadata"]["uid"] = "unexpected-secret-like-value"
+        with self.assertRaisesRegex(RuntimeError, "source-owned Catalog Billing predecessor") as failure:
+            fixture.billing_predecessor(Host(), journal)
+        snapshot = json.loads(str(failure.exception).split(": ", 1)[1])
+        self.assertEqual(snapshot, {"source_uid": False, "source_digest": True,
+                                    "source_ready_current": False, "stage_uid": True,
+                                    "stage_ready_current": True})
+        self.assertNotIn("unexpected-secret-like-value", str(failure.exception))
+
+    def test_predecessor_transition_requires_same_locations_run(self):
+        identity = {"fixture": "owned"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            private = root / "apps-a1t-locations-private"
+            private.mkdir(mode=0o700)
+            installer_path = root / "installer.json"
+            locations_path = root / "locations.json"
+            catalog_path = root / "catalog.json"
+            transition_path = root / "transition.json"
+            rows = {
+                locations_path: {"source": fixture.LOCATIONS_SHA,
+                                 "cleanup": "not-requested", "setup_stage": "ready",
+                                 "scope_identity": identity, "run_id": "a" * 24,
+                                 "installer_run_id": "b" * 24},
+                private / "state.json": {"run_id": "a" * 24,
+                                          "auth_intent": True,
+                                          "old_b64": "catalog-csv",
+                                          "new_b64": "locations-csv"},
+                catalog_path: {"complete": True, "cleanup": "not-requested",
+                               "catalog_source": fixture.CATALOG_SHA,
+                               "billing_digest": fixture.BILLING_DIGEST,
+                               "scope_identity": identity,
+                               "installer_run_id": "b" * 24},
+                transition_path: {"locations_run_id": "c" * 24},
+            }
+            for path, row in rows.items():
+                path.write_text(json.dumps(row))
+                path.chmod(0o600)
+            with mock.patch.object(fixture, "active_catalog_installer",
+                                   return_value=({"run_id": "b" * 24},
+                                                 {"new_b64": "catalog-csv"})), \
+                 mock.patch.object(fixture, "verified_live_transition") as verified:
+                with self.assertRaisesRegex(RuntimeError, "does not bind"):
+                    fixture.live_dependencies(object(), object(), identity,
+                        installer_path, catalog_path, locations_path,
+                        transition_path, {})
+                verified.assert_not_called()
+                transition_path.write_text(json.dumps({"locations_run_id": "a" * 24}))
+                verified.side_effect = RuntimeError("reached verified predecessor")
+                with self.assertRaisesRegex(RuntimeError, "reached verified predecessor"):
+                    fixture.live_dependencies(object(), object(), identity,
+                        installer_path, catalog_path, locations_path,
+                        transition_path, {})
+
     def test_clean_revision_requires_valid_signature(self):
         class Git:
             def __init__(self, reject=False):
@@ -85,31 +165,64 @@ class FakeMilo:
 
 
 class CleanupSafetyTests(unittest.TestCase):
+    def test_failed_authorization_probe_records_only_operation_before_request(self):
+        class Probe:
+            calls = 0
+            def can_i(self, *_):
+                self.calls += 1
+                if self.calls == 2:
+                    raise RuntimeError("test-only SSAR failure")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            evidence = {"run_id": "a" * 24}
+            def record(operation):
+                evidence["authorization_probe"] = operation
+                fixture.atomic_json(path, evidence)
+            with self.assertRaisesRegex(RuntimeError, "SSAR failure"):
+                fixture.authorization_probes(Probe(), record)
+            observed = json.loads(path.read_text())
+            self.assertEqual(observed["authorization_probe"], {
+                "verb": "get",
+                "resource": "customresourcedefinitions.apiextensions.k8s.io",
+                "expected": False,
+                "name": "foreign.networking.datumapis.com",
+                "state": "started"})
+            self.assertEqual(set(observed), {"run_id", "authorization_probe"})
+
     def test_installer_probe_uses_distinct_private_owned_files(self):
         ca = b"public test CA"
-        source = {"current-context": "milo",
-                  "clusters": [{"cluster": {"server":
-                    "https://milo-apiserver.milo-system.svc:6443",
-                    "certificate-authority-data": base64.b64encode(ca).decode()}}],
-                  "users": [{"user": {"token": "test-only-token"}}]}
+        source = installer_source.kubeconfig(
+            base64.b64encode(ca).decode(), "test-only-token")
         class Host:
             def json(self, *args):
                 return {"data": {"kubeconfig": base64.b64encode(
                     yaml.safe_dump(source).encode()).decode()}}
         identity = {"milo": {"ca_sha256": hashlib.sha256(ca).hexdigest()}}
         with tempfile.TemporaryDirectory() as directory:
-            first_dir, first_path = fixture.installer_probe_config(
+            first_dir, first_path, first_context = fixture.installer_probe_config(
                 Host(), identity, Path(directory), 43443)
             first_data = first_path.read_bytes()
-            second_dir, second_path = fixture.installer_probe_config(
+            second_dir, second_path, second_context = fixture.installer_probe_config(
                 Host(), identity, Path(directory), 45443)
             self.assertNotEqual(first_dir, second_dir)
             self.assertEqual(first_data, first_path.read_bytes())
+            self.assertEqual(first_context, source["current-context"])
+            self.assertEqual(second_context, source["current-context"])
             self.assertEqual(stat.S_IMODE(first_dir.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(first_path.stat().st_mode), 0o600)
             self.assertEqual(yaml.safe_load(second_path.read_text())
                              ["clusters"][0]["cluster"]["server"],
                              "https://127.0.0.1:45443")
+            changed = copy.deepcopy(source)
+            changed["clusters"][0]["cluster"]["server"] = \
+                "https://milo-apiserver.milo-system.svc:6443"
+            class WrongHost:
+                def json(self, *args):
+                    return {"data": {"kubeconfig": base64.b64encode(
+                        yaml.safe_dump(changed).encode()).decode()}}
+            with self.assertRaisesRegex(RuntimeError, "CA or origin changed"):
+                fixture.installer_probe_config(WrongHost(), identity,
+                                               Path(directory), 43443)
 
     def test_foreign_project_or_binding_blocks_crd_prune(self):
         with self.assertRaisesRegex(RuntimeError, "foreign or missing Project"):
