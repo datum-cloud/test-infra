@@ -19,6 +19,28 @@ spec.loader.exec_module(bootstrap)
 
 
 class BootstrapContractTest(unittest.TestCase):
+    def test_cleanup_accepts_only_reviewed_matching_guard_upgrade(self):
+        guard_revision = "200de48a305732720377cb83308d57c84fd5f688"
+        guard_image = "sha256:784997aec9c3b1cf5dfc993e578b108e7ef627ff835982cb58e74d1b86378a5c"
+        source = {"spec": {"ref": {"commit": guard_revision},
+                            "url": "https://github.com/milo-os/milo.git"},
+                  "status": {"artifact": {"revision": "sha1:" + guard_revision}}}
+        core = {"spec": {"path": "./config/overlays/test-infra",
+                          "sourceRef": {"kind": "GitRepository", "name": "milo"},
+                          "images": [{"name": "ghcr.io/milo-os/milo", "digest": guard_image}]},
+                "status": {"lastAppliedRevision": "sha1:" + guard_revision}}
+        host = SimpleNamespace(json=lambda _verb, kind, *_args: source if kind == "gitrepository" else core)
+        with mock.patch.object(bootstrap, "ready", return_value=True):
+            bootstrap.source_guard(host, cleanup=True)
+            with self.assertRaisesRegex(RuntimeError, "unreviewed Milo revision"):
+                bootstrap.source_guard(host)
+            core["spec"]["images"][0]["digest"] = bootstrap.MILO_IMAGE
+            with self.assertRaisesRegex(RuntimeError, "reviewed pin"):
+                bootstrap.source_guard(host, cleanup=True)
+            source["spec"]["ref"]["commit"] = "f" * 40
+            with self.assertRaisesRegex(RuntimeError, "unreviewed Milo revision"):
+                bootstrap.source_guard(host, cleanup=True)
+
     def test_source_owned_shape_and_exact_names(self):
         org = bootstrap.organization_manifest("run")
         self.assertEqual((org["kind"], org["spec"], org["metadata"]["name"]),

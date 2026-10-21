@@ -425,3 +425,62 @@ UID/RV deletion, and four exact numeric JSON values. A second read-only
 preflight after cleanup passed with no owned collisions. This is local native
 authoring evidence, not a fresh-cluster CI, production IAM, customer install,
 or Workload-to-route result.
+
+## Guarded authoring follow-up
+
+The next native runner requires Milo ownership-guard source
+`200de48a305732720377cb83308d57c84fd5f688` and verified image index
+`sha256:784997aec9c3b1cf5dfc993e578b108e7ef627ff835982cb58e74d1b86378a5c`.
+Apps runtime is `37404c9f4364e456b23e77a57c9f01a65a250666`, with verified
+index `sha256:8eb09c545ba3f1e8f1a7eddb9f5667ae914786cf4da1d63a21cd38ef7652e610`.
+This runtime uses an authoring-specific Project annotation, so it does not
+forge the ownership marker now reserved by Milo. Existing old-marker templates
+are not migrated by this change; use fresh Project authoring data.
+
+The earlier baseline examples and results above remain historical. For the
+new guarded trial use the clean Apps configuration at
+`7782d0be23af76adf063e97da526b42d25996c2c` and its
+`apps-execution/evidence/controller-runtime-guard-image.json`. The native
+runner validates both platform manifests/configs against that evidence before
+execution. The internal pending-App opt-in is not included in this runtime.
+
+Project creation continues to require the original bootstrap source/image.
+After the reviewed upgrade, Project cleanup accepts that exact original pair
+or the exact guard pair above; it rejects mixed pairs, unknown revisions and
+unhealthy/suspended Flux. Project UID and resourceVersion deletion checks still
+apply. There is no arbitrary source or image override.
+
+Run the separately documented [guard API probe](apps-ownership-guard-probe.md)
+after the upgrade and before authoring. It removes only its own ConfigMaps and
+retains its recorded Namespace UID for dedicated fixture teardown. That retained
+namespace is not a claim of complete fixture cleanup. A guard-specific denial
+and the authoring trial together still do not prove component acquisition,
+release authority, Project drain, or live Workload traffic.
+
+The source-owned upgrade helper is `hack/upgrade-apps-native-milo-guard.py`.
+It defaults to read-only preflight. Supply the private host/root kubeconfigs,
+bootstrap evidence, a new private `--journal` and a free `--upgrade-port` distinct
+from the bootstrap port. Add `--execute` for the four journaled UID/RV updates;
+add `--resume` only to recover the exact journal after interruption. It owns a
+reconnecting Service forward, verifies the original source-owned Flux shape,
+checks the Project/Organization, CA, Service and host cluster identities, and
+refuses any already-active Apps or native service stage. The resulting guard
+rollout must match the recorded Deployment UID, ReplicaSet ownership chain,
+node architecture and verified image digest. No automatic downgrade is attempted.
+
+Run it before adding any service credentials or suspending Milo for the
+Catalog/Locations stages. Keep the fixture exclusively owned during the bounded
+upgrade; separate object checks cannot atomically exclude a concurrent operator.
+On failure its fixed diagnostic identifies the phase and whether a private
+journal exists; it does not print API error bodies or credentials. The reusable
+CI workflow performs the upgrade and probe before authoring and preserves their
+noncredential journals with the trial artifacts. Its reconnecting forwards are
+terminated and awaited before the next stage reuses the local port. Persistent
+runners must have no pre-existing workspace kubeconfig; cleanup removes only the
+file matching this run's creation intent and recorded hash.
+
+Lead offline validation for this follow-up: 14 upgrade recovery/failure tests,
+12 guard-probe cases, and 49 existing native harness/bootstrap/CLI/capacity/
+forwarder tests pass. The guarded Apps source/image contract passes for arm64.
+All workflow shell blocks pass syntax validation. These are preflight and
+failure-path evidence; the guarded live trial has not yet run.
