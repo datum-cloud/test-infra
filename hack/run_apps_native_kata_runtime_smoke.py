@@ -37,6 +37,10 @@ MEMBER_CLUSTER = re.compile(r"^apps-a1t-kata-vz-[a-z0-9-]+$")
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 NODE_ID = re.compile(r"^[0-9a-f]{64}$")
 RUNTIME_CLASS = "kata-qemu"
+RUNTIME_SCHEDULING_SELECTOR = {
+    "kata-deploy.katacontainers.io/default": "true",
+    "katacontainers.io/kata-runtime": "true",
+}
 NAMESPACE_PREFIX = "kata-runtime-smoke-"
 POD_NAME = "guest-kernel"
 LABEL_KEY = "apps-native-kata-smoke.datum.net/run-id"
@@ -444,7 +448,7 @@ def validate_guest_evidence(pod_doc: dict, member_node: str, run_id: str,
             pod_doc.get("spec", {}).get("nodeName") == member_node and
             pod_doc.get("spec", {}).get("nodeSelector") == {
                 "kubernetes.io/hostname": member_node,
-                "katacontainers.io/kata-runtime": "true"} and
+                **RUNTIME_SCHEDULING_SELECTOR} and
             pod_doc.get("spec", {}).get("automountServiceAccountToken") is False and
             metadata.get("labels", {}).get(LABEL_KEY) == run_id and
             metadata.get("uid") == expected_uid and len(statuses) == 1 and len(containers) == 1 and
@@ -459,6 +463,15 @@ def validate_guest_evidence(pod_doc: dict, member_node: str, run_id: str,
     require(guest_kernel and guest_kernel != node_kernel,
             "guest kernel does not differ from the Kind node kernel")
     require(guest_arch in ("aarch64", "arm64"), "guest did not report ARM64 architecture")
+
+
+def validate_runtime_class(runtime_class: dict) -> None:
+    # Kubernetes admission merges RuntimeClass scheduling.nodeSelector into
+    # the Pod. The immutable Kata chart, not the smoke fixture, owns this key.
+    require(runtime_class.get("handler") == RUNTIME_CLASS and
+            runtime_class.get("scheduling") == {
+                "nodeSelector": RUNTIME_SCHEDULING_SELECTOR},
+            "Kata RuntimeClass handler or scheduling selector differs from pinned chart")
 
 
 def kubectl_json(kubeconfig: Path, context: str, env: dict[str, str], *args: str) -> dict:
@@ -707,7 +720,7 @@ def setup_member(profile: str, host_cluster: str, host_evidence: Path,
     flux_evidence = verify_flux_and_installer(member_kubeconfig, context, env)
     runtime_class = json.loads(run(kubectl_args(member_kubeconfig, context, "get", "runtimeclass",
                                                RUNTIME_CLASS, "-o", "json"), env))
-    require(runtime_class.get("handler") == "kata-qemu", "RuntimeClass handler is not kata-qemu")
+    validate_runtime_class(runtime_class)
     member_node_doc = json.loads(run(kubectl_args(member_kubeconfig, context, "get", "node", member_node,
                                                   "-o", "json"), env))
     require(member_node_doc.get("metadata", {}).get("labels", {}).get("katacontainers.io/kata-runtime") == "true",
