@@ -160,6 +160,10 @@ records the member Node UID before installing Flux or Kata. It verifies
 resolving a possible `/lib` to `/usr/lib` alias before checking mountinfo, then waits for local
 Flux, the pinned Kata HelmRelease and DaemonSet, and checks that the real
 RuntimeClass handler is `kata-qemu`.
+The exact RuntimeClass scheduling selector is checked before Pod creation.
+Kubernetes admission merges its `kata-deploy.katacontainers.io/default=true`
+selector into the smoke Pod; the final Pod must have exactly that source-owned
+key and the two requested node selectors, with no extra selector.
 
 The member node applies the two upstream nested-QEMU workarounds: clear
 `cpu_features` in every installed QEMU configuration and remount its `/dev/shm`

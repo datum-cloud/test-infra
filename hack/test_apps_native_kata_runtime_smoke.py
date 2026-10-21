@@ -439,7 +439,7 @@ class SmokeContractTests(unittest.TestCase):
         pod = {"metadata": {"labels": {smoke.LABEL_KEY: run_id}},
                "spec": {"runtimeClassName": "kata-qemu", "nodeName": MEMBER + "-control-plane",
                         "nodeSelector": {"kubernetes.io/hostname": MEMBER + "-control-plane",
-                                         "katacontainers.io/kata-runtime": "true"},
+                                         **smoke.RUNTIME_SCHEDULING_SELECTOR},
                         "automountServiceAccountToken": False},
                "status": {"phase": "Running", "containerStatuses": [{
                    "imageID": "docker-pullable://busybox@" + LOCK["smokeImageArm64Manifest"]}]}}
@@ -479,6 +479,35 @@ class SmokeContractTests(unittest.TestCase):
             smoke.validate_guest_evidence(not_ready, MEMBER + "-control-plane", run_id, "pod-uid",
                                           pod["status"]["containerStatuses"][0]["imageID"],
                                           "6.1.0-kata", "6.1.0-kind", "aarch64")
+
+        for key, value in (("kata-deploy.katacontainers.io/default", None),
+                           ("foreign.example/selector", "true")):
+            changed_selector = copy.deepcopy(pod)
+            if value is None:
+                changed_selector["spec"]["nodeSelector"].pop(key)
+            else:
+                changed_selector["spec"]["nodeSelector"][key] = value
+            with self.subTest(selector=key):
+                with self.assertRaisesRegex(smoke.PreflightError, "node identity"):
+                    smoke.validate_guest_evidence(
+                        changed_selector, MEMBER + "-control-plane", run_id,
+                        "pod-uid", pod["status"]["containerStatuses"][0]["imageID"],
+                        "6.1.0-kata", "6.1.0-kind", "aarch64")
+
+    def test_runtimeclass_scheduling_must_match_pinned_chart(self) -> None:
+        expected = {"handler": "kata-qemu", "scheduling": {
+            "nodeSelector": copy.deepcopy(smoke.RUNTIME_SCHEDULING_SELECTOR)}}
+        smoke.validate_runtime_class(expected)
+        for changed in (
+            {"handler": "runc", "scheduling": expected["scheduling"]},
+            {"handler": "kata-qemu", "scheduling": {"nodeSelector": {
+                "katacontainers.io/kata-runtime": "true"}}},
+            {"handler": "kata-qemu", "scheduling": {
+                "nodeSelector": expected["scheduling"]["nodeSelector"],
+                "tolerations": [{"key": "foreign"}]}},
+        ):
+            with self.assertRaisesRegex(smoke.PreflightError, "RuntimeClass"):
+                smoke.validate_runtime_class(changed)
 
     def test_cleanup_refuses_replaced_member_container(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
