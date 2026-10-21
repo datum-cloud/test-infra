@@ -85,6 +85,38 @@ bounded validator errors for its public manifests. Both versions validate
 the two Flux resources with zero errors or skips. The full offline task also
 passes with CI's exact v0.6.7. These corrections do not establish guest boot.
 
+## Dedicated VM inotify prerequisite
+
+Host and member containers share the VM's per-UID inotify instance allowance.
+The second trial reached Flux installation, but its kube-proxy reported
+`too many open files` with root holding 127 instances against the VM limit of
+128. Node memory/disk/PID pressure was absent and the images had pulled.
+This is the same VM prerequisite documented in
+[the federation fixture](apps-federation-prerequisite.md).
+
+Before adding a member, the read-only preflight requires at least 1,024 inotify
+instances and records the observed value in the creation journal. This is a
+minimum for this fixture, not a general capacity guarantee. Cleanup does not
+require that allowance, so exhausted capacity cannot block member removal.
+The runner never changes a kernel setting automatically.
+
+For the explicitly selected, task-owned VM, inspect the value and apply the
+documented setting if it is lower; preserve a higher existing setting:
+
+```sh
+colima ssh --profile apps-native-vz-20261021 -- \
+  cat /proc/sys/fs/inotify/max_user_instances
+colima ssh --profile apps-native-vz-20261021 -- \
+  sudo sysctl -w fs.inotify.max_user_instances=1024
+```
+
+Record the original and resulting values with the fixture evidence. This
+command changes only the running dedicated VM and is not persistent across
+VM restarts. Run the read-only preflight after every restart and prepare this
+prerequisite again when necessary. No host macOS or unrelated profile setting
+is changed. Recovery observations from an already-failed member are separate
+diagnostics; a complete smoke requires a fresh run and evidence directory.
+
 ## Proposed execution sequence
 
 Choose exact names for the existing dedicated VZ profile and host cluster.

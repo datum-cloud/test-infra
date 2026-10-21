@@ -99,6 +99,18 @@ class SmokeContractTests(unittest.TestCase):
         with self.assertRaisesRegex(smoke.PreflightError, "immutable container ID"):
             smoke.docker_member_exec_args(MEMBER + "-control-plane", "sh", "-ec", "true")
 
+    def test_vm_inotify_capacity_is_read_from_explicit_profile(self) -> None:
+        with mock.patch.object(smoke, "run", return_value="1024") as run:
+            self.assertEqual(smoke.read_inotify_capacity(PROFILE, {}), 1024)
+            run.assert_called_once_with(["colima", "ssh", "--profile", PROFILE, "--", "cat",
+                                         "/proc/sys/fs/inotify/max_user_instances"], {})
+        for value in ("128", "1023", "", "-1", "unknown", "1024\nother"):
+            with self.subTest(value=value), mock.patch.object(smoke, "run", return_value=value):
+                with self.assertRaisesRegex(smoke.PreflightError, "max_user_instances >= 1024"):
+                    smoke.read_inotify_capacity(PROFILE, {})
+        with mock.patch.object(smoke, "run", return_value="8192"):
+            self.assertEqual(smoke.read_inotify_capacity(PROFILE, {}), 8192)
+
     def test_member_modules_mount_uses_resolved_path_and_requires_ro(self) -> None:
         # Ubuntu's /lib alias resolves to /usr/lib, the actual Kind mountpoint
         # observed in the dedicated VZ member on 2026-10-21.
@@ -114,6 +126,44 @@ class SmokeContractTests(unittest.TestCase):
             smoke.verify_readonly_modules_mount(ro + "\n" + ro, "/usr/lib/modules")
         with self.assertRaisesRegex(smoke.PreflightError, "observation is invalid"):
             smoke.verify_readonly_modules_mount(ro, "../usr/lib/modules")
+
+    def test_low_inotify_blocks_creation_but_not_cleanup_preflight(self) -> None:
+        for cleanup in (False, True):
+            with self.subTest(cleanup=cleanup), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                evidence = write_host_evidence(root)
+                output = root / "new-smoke-private"
+                seen = []
+
+                def fake_run(argv, env, **kwargs):
+                    seen.append(argv)
+                    if argv[:2] == ["docker", "info"]:
+                        return "aarch64" if argv[-1] == "{{.Architecture}}" else "6"
+                    if argv[:2] == ["colima", "ssh"]:
+                        return "128" if argv[-1].endswith("max_user_instances") else ""
+                    if argv == ["kind", "get", "clusters"]:
+                        return HOST + ("\n" + MEMBER if cleanup else "")
+                    if argv[:3] == ["kind", "get", "nodes"]:
+                        return argv[-1] + "-control-plane"
+                    if argv[:2] == ["docker", "inspect"]:
+                        return NODE_ID
+                    if argv[-2:] == ["config", "current-context"]:
+                        return "kind-" + HOST
+                    raise AssertionError(f"unexpected preflight command: {argv}")
+
+                with mock.patch.object(smoke, "docker_env", return_value={}), \
+                     mock.patch.object(smoke, "get_node_uid", return_value=(NODE_UID, "kernel", {})), \
+                     mock.patch.object(smoke, "run", side_effect=fake_run):
+                    if cleanup:
+                        result = smoke.preflight(PROFILE, HOST, evidence, MEMBER, output, cleanup=True)
+                        self.assertTrue(result["memberPresent"])
+                        self.assertIsNone(result["inotifyMaxUserInstances"])
+                    else:
+                        with self.assertRaisesRegex(smoke.PreflightError, "max_user_instances >= 1024"):
+                            smoke.preflight(PROFILE, HOST, evidence, MEMBER, output)
+                self.assertFalse(output.exists())
+                self.assertFalse(any(argv[:3] == ["kind", "create", "cluster"] for argv in seen))
+                self.assertEqual(any(argv[-1].endswith("max_user_instances") for argv in seen), not cleanup)
 
     def test_host_evidence_requires_matching_profile_cluster_and_private_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
