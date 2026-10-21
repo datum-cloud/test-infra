@@ -3,7 +3,7 @@
 
 Default mode is read-only preflight; --offline verifies source/render contracts
 without cluster access. --execute requires reviewed, explicit private contexts.
-It never creates a Workload, Instance, ResourceClaim, or tenant route.
+It never persists a Workload, Instance, ResourceClaim, or tenant route.
 """
 
 import argparse
@@ -37,6 +37,18 @@ ARM_MANIFEST = "sha256:d288691dee2c3935712fe70e3f4b43af063c16db27bd7bc9ab38b1951
 ARM_CONFIG = "sha256:5d230dc6141ad919d653540d6a23ed2ac5b679622a1acbbb890d1f14a0bc98ae"
 IMAGE = "ghcr.io/datum-cloud/compute@" + IMAGE_INDEX
 USERS = ("apps-a1t-compute-discovery", "apps-a1t-compute-project", "apps-a1t-compute-quota")
+ADMISSION_USER = "apps-a1t-compute-admission-installer"
+ADMISSION_NAMES = {"MutatingWebhookConfiguration": "compute-mutating",
+                   "ValidatingWebhookConfiguration": "compute-validating"}
+ADMISSION_PATHS = {
+    "minstanceconsolesession.kb.io": "/mutate-compute-datumapis-com-v1alpha-instanceconsolesession",
+    "mworkload.kb.io": "/mutate-compute-datumapis-com-v1alpha-workload",
+    "vinstanceconsolesession.kb.io": "/validate-compute-datumapis-com-v1alpha-instanceconsolesession",
+    "vinstancetype.kb.io": "/validate-compute-datumapis-com-v1alpha-instancetype",
+    "vworkload.kb.io": "/validate-compute-datumapis-com-v1alpha-workload",
+    "vworkloaddeployment.kb.io": "/validate-compute-datumapis-com-v1alpha-workloaddeployment",
+}
+PROBE_IMAGE = "docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
 HUB_SA = "apps-a1t-compute-manager"
 INSTALLER_SA = "apps-a1t-hub-crd-installer"
 INSTALLER_KUBECONFIG_SECRET = "compute-a1t-hub-crd-installer-kubeconfig"
@@ -308,6 +320,57 @@ def source_contract(args):
     ]
     require(cert_bootstrap == expected_certs,
             "task-owned Compute webhook CA/Issuer bootstrap contract changed")
+    admission_configs = [item for item in rendered if item["kind"] in ADMISSION_NAMES]
+    require({(item["kind"], item["metadata"]["name"]) for item in admission_configs} ==
+            set(ADMISSION_NAMES.items()) and len(admission_configs) == 2,
+            "source-rendered Compute admission configurations changed")
+    seen_hooks = {}
+    for item in admission_configs:
+        for hook in item["webhooks"]:
+            name = hook["name"]
+            require(name not in seen_hooks and name in ADMISSION_PATHS,
+                    f"unreviewed Compute admission hook {name}")
+            seen_hooks[name] = item["kind"]
+            require(hook["clientConfig"] == {"service": {
+                        "name": "webhook-service", "namespace": "compute-system",
+                        "path": ADMISSION_PATHS[name]}} and
+                    hook["failurePolicy"] == "Fail" and
+                    hook["sideEffects"] == "None" and
+                    hook["admissionReviewVersions"] == ["v1"] and
+                    hook["rules"] == next(source_hook["rules"] for source_doc in
+                        manifests(args.source / "config/base/webhook/manifests.yaml")
+                        for source_hook in source_doc["webhooks"] if source_hook["name"] == name),
+                    f"Compute admission hook {name} diverged from pinned source")
+    require(seen_hooks == {
+        "minstanceconsolesession.kb.io": "MutatingWebhookConfiguration",
+        "mworkload.kb.io": "MutatingWebhookConfiguration",
+        "vinstanceconsolesession.kb.io": "ValidatingWebhookConfiguration",
+        "vinstancetype.kb.io": "ValidatingWebhookConfiguration",
+        "vworkload.kb.io": "ValidatingWebhookConfiguration",
+        "vworkloaddeployment.kb.io": "ValidatingWebhookConfiguration",
+    }, "Compute admission hook count or kinds changed")
+    probe = None
+    if args.native_admission:
+        try:
+            import jsonschema
+        except ImportError as exc:
+            raise RuntimeError("--native-admission offline schema check needs python jsonschema") from exc
+        probe = yaml.safe_load((args.source / "test/e2e/instance-types/workload-valid.yaml").read_text())
+        require(probe["apiVersion"] == "compute.datumapis.com/v1alpha" and
+                probe["kind"] == "Workload" and
+                len(probe["spec"]["placements"]) == 1 and
+                len(probe["spec"]["template"]["spec"]["runtime"]["sandbox"]["containers"]) == 1,
+                "pinned Workload admission probe fixture shape changed")
+        probe["metadata"] = {"name": "apps-a1t-admission-probe", "namespace": "default"}
+        probe["spec"]["template"]["spec"]["runtime"]["sandbox"]["containers"][0]["image"] = PROBE_IMAGE
+        # The CRD defaults this required field at the API server; explicitly
+        # materialize that same default for offline JSON Schema validation.
+        probe["spec"]["placements"][0]["scaleSettings"]["instanceManagementPolicy"] = "OrderedReady"
+        workload_crd = next(item for item in hub_crds if item["metadata"]["name"] ==
+                            "workloads.compute.datumapis.com")
+        schema = workload_crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.Draft202012Validator(schema).validate(probe)
     cell_rendered = manifests_text(run(
         "flux", "build", "kustomization", "compute-a1t-dfw-cell", "--path",
         str(args.source / "config/overlays/cell"), "--kustomization-file",
@@ -360,6 +423,7 @@ def source_contract(args):
             "upstream Karmada downstream RBAC shape changed")
     return {"source": source, "management": management, "rendered": rendered,
             "cert_bootstrap": cert_bootstrap,
+            "admission_configs": admission_configs, "admission_probe": probe,
             "nso_source": nso_source, "hub_compute": hub_compute, "hub_nso": hub_nso,
             "hub_crds": hub_crds, "milo_roles": roles,
             "hub_role": next(x for x in hub if x["kind"] == "ClusterRole")}
@@ -523,6 +587,15 @@ def preflight(args, private, contract):
         require(optional(args.milo_kubeconfig, "milo-root", None, item["kind"].lower(),
                          item["metadata"]["name"]) is None,
                 f"refusing existing Milo {item['kind']}/{item['metadata']['name']}")
+    if args.native_admission:
+        for kind, name in ADMISSION_NAMES.items():
+            require(optional(args.milo_kubeconfig, "milo-root", None,
+                             kind.lower(), name) is None,
+                    f"refusing existing Milo admission {kind}/{name}")
+        for kind in ("clusterrole", "clusterrolebinding"):
+            require(optional(args.milo_kubeconfig, "milo-root", None, kind,
+                             ADMISSION_USER) is None,
+                    f"refusing existing Milo admission {kind}/{ADMISSION_USER}")
 
     hub_ca_encoded = k(args.hub_host_kubeconfig, args.hub_host_context, "-n", "karmada-system",
                        "get", "secret", "karmada-cert", "-o",
@@ -840,7 +913,8 @@ def patch_auth(args, snapshot, expected, replacement, private):
 def append_auth(old_b64, tokens):
     original = base64.b64decode(old_b64).decode()
     suffix = "" if original.endswith("\n") else "\n"
-    additions = "".join(f"{tokens[user]},{user},{user},system:authenticated\n" for user in USERS)
+    additions = "".join(f"{token},{user},{user},system:authenticated\n"
+                        for user, token in tokens.items())
     return base64.b64encode((original + suffix + additions).encode()).decode()
 
 
@@ -856,6 +930,70 @@ def installer_role():
                  "resourceNames": names,
                  "verbs": ["get", "update", "patch", "delete"]},
             ]}
+
+
+def admission_installer_manifests():
+    role = {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole",
+            "metadata": {"name": ADMISSION_USER},
+            "rules": [
+                {"apiGroups": ["admissionregistration.k8s.io"],
+                 "resources": ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"],
+                 "verbs": ["create"]},
+                {"apiGroups": ["admissionregistration.k8s.io"],
+                 "resources": ["mutatingwebhookconfigurations"],
+                 "resourceNames": ["compute-mutating"], "verbs": ["get", "delete"]},
+                {"apiGroups": ["admissionregistration.k8s.io"],
+                 "resources": ["validatingwebhookconfigurations"],
+                 "resourceNames": ["compute-validating"], "verbs": ["get", "delete"]},
+            ]}
+    binding = {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding",
+               "metadata": {"name": ADMISSION_USER},
+               "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole",
+                           "name": ADMISSION_USER},
+               "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User",
+                             "name": ADMISSION_USER}]}
+    return (role, binding)
+
+
+def admission_observed_matches(manifest, observed, uid, run_id):
+    """Allow only API-server defaults beyond the exact source webhooks + public CA."""
+    if (not observed or observed["metadata"].get("uid") != uid or
+            observed["metadata"].get("labels", {}).get(RUN_LABEL) != run_id or
+            len(observed.get("webhooks", [])) != len(manifest["webhooks"])):
+        return False
+    defaults = {"matchPolicy": "Equivalent", "timeoutSeconds": 10,
+                "namespaceSelector": {}, "objectSelector": {},
+                "reinvocationPolicy": "Never"}
+    for wanted, actual in zip(manifest["webhooks"], observed["webhooks"]):
+        if (actual.get("name") != wanted["name"] or
+                any(actual.get(key) != value for key, value in wanted.items()
+                    if key not in ("clientConfig", "rules")) or
+                any(actual.get(key) != value for key, value in defaults.items()
+                    if key in actual and key not in wanted)):
+            return False
+        actual_rules = actual.get("rules", [])
+        if len(actual_rules) != len(wanted["rules"]):
+            return False
+        for wanted_rule, actual_rule in zip(wanted["rules"], actual_rules):
+            observed_rule = dict(actual_rule)
+            if "scope" not in wanted_rule and observed_rule.get("scope") == "*":
+                observed_rule.pop("scope")
+            if observed_rule != wanted_rule:
+                return False
+        if set(actual) - set(wanted) - set(defaults):
+            return False
+        client = actual.get("clientConfig", {})
+        expected_client = wanted["clientConfig"]
+        if (client.get("caBundle") != expected_client["caBundle"] or
+                set(client) != {"service", "caBundle"}):
+            return False
+        service = client.get("service", {})
+        expected_service = expected_client["service"]
+        if (any(service.get(key) != value for key, value in expected_service.items()) or
+                set(service) - set(expected_service) - {"port"} or
+                service.get("port", 443) != 443):
+            return False
+    return True
 
 
 def kubeconfig_text(server, ca, token, tls_server_name=None):
@@ -899,6 +1037,135 @@ def milo_http(port, ca_file, token, method, path, body=None):
         conn.close()
 
 
+def milo_json_response(port, ca_file, token, method, path, body=None):
+    """Bound one authenticated project request and its response body."""
+    context = ssl.create_default_context(cafile=str(ca_file))
+    conn = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=10)
+    try:
+        payload = json.dumps(body).encode() if body is not None else None
+        conn.request(method, path, body=payload,
+                     headers={"Authorization": f"Bearer {token}",
+                              "Content-Type": "application/json"})
+        response = conn.getresponse()
+        raw = response.read(65537)
+        require(len(raw) <= 65536, "Milo admission response exceeded 64 KiB")
+        return response.status, json.loads(raw) if raw else {}
+    finally:
+        conn.close()
+
+
+def probe_admission_installer(args, private, snapshot, token):
+    config = private / "milo-admission-installer.yaml"
+    private_write(config, kubeconfig_text(f"https://127.0.0.1:{args.direct_milo_port}",
+                                        snapshot["milo_ca"], token))
+    for kind, name in (("mutatingwebhookconfigurations", "compute-mutating"),
+                       ("validatingwebhookconfigurations", "compute-validating")):
+        resource = f"{kind}.admissionregistration.k8s.io"
+        can_i(config, "create", resource, True)
+        for verb in ("get", "delete"):
+            can_i(config, verb, resource, True, name=name)
+            can_i(config, verb, resource, False, name="apps-a1t-foreign")
+        for verb in ("list", "watch", "update", "patch"):
+            can_i(config, verb, resource, False)
+    for verb, resource in (("get", "secrets"), ("create", "secrets"),
+                           ("create", "clusterroles.rbac.authorization.k8s.io"),
+                           ("create", "clusterrolebindings.rbac.authorization.k8s.io"),
+                           ("impersonate", "users"),
+                           ("create", "workloads.compute.datumapis.com")):
+        can_i(config, verb, resource, False)
+    ca_file = private / "milo-direct-ca.pem"
+    require(milo_http(args.direct_milo_port, ca_file, token, "GET",
+                      "/api/v1/namespaces/default/secrets/apps-a1t-denial-probe") == 403,
+            "admission installer unexpectedly read a Milo Secret")
+    return config
+
+
+def native_admission_probe(args, contract, snapshot, tokens, ca_file, run_id,
+                           stage, evidence):
+    """Compare genuine project dry-runs before and after native webhook registration."""
+    project = PROJECTS[1]
+    project_uid = snapshot["projects"][project]
+    require(kjson(args.milo_kubeconfig, "milo-root", "get", "project", project)
+            ["metadata"]["uid"] == project_uid, "Project UID changed before admission probe")
+    probe = json.loads(json.dumps(contract["admission_probe"]))
+    name = "apps-a1t-admission-" + run_id.rsplit("-", 1)[-1]
+    probe["metadata"] = {"name": name, "namespace": "default"}
+    evidence["native_admission"]["probe_workload_name"] = name
+    root = f"{PROJECT_API}/{project}/control-plane/apis/compute.datumapis.com/v1alpha"
+    collection = root + "/namespaces/default/workloads"
+    item = collection + "/" + name
+    token = tokens[USERS[1]]
+
+    location_path = (f"{PROJECT_API}/{project}/control-plane"
+                     "/apis/locations.miloapis.com/v1alpha1/locations")
+    location_status, locations = milo_json_response(args.direct_milo_port, ca_file, token,
+                                                    "GET", location_path)
+    require(location_status == 200 and locations.get("kind") == "LocationList" and
+            all(location.get("metadata", {}).get("name") != "dfw" for location in
+                locations.get("items", [])),
+            "genuine Project Location registry is unavailable or dfw already exists")
+    location_hash = hashlib.sha256(json.dumps(locations.get("items", []),
+                                              sort_keys=True).encode()).hexdigest()
+    if stage == "baseline":
+        evidence["native_admission"]["existing_locations_sha256"] = location_hash
+    else:
+        require(location_hash == evidence["native_admission"]["existing_locations_sha256"],
+                "Project Locations changed between absent/present webhook probes")
+
+    list_status, current_list = milo_json_response(args.direct_milo_port, ca_file, token,
+                                                   "GET", collection)
+    require(list_status == 200 and current_list.get("kind") == "WorkloadList",
+            "could not snapshot genuine Project Workload collection")
+    before_items = current_list.get("items", [])
+    before_hash = hashlib.sha256(json.dumps(before_items, sort_keys=True).encode()).hexdigest()
+    if stage == "baseline":
+        evidence["native_admission"]["existing_workload_count"] = len(before_items)
+        evidence["native_admission"]["existing_workloads_sha256"] = before_hash
+    else:
+        require(before_hash == evidence["native_admission"]["existing_workloads_sha256"],
+                "Project Workloads changed between absent/present webhook probes")
+
+    def absent():
+        status, _ = milo_json_response(args.direct_milo_port, ca_file, token, "GET", item)
+        require(status == 404, f"Workload probe {name} unexpectedly persisted: HTTP {status}")
+
+    absent()
+    status, result = milo_json_response(args.direct_milo_port, ca_file, token, "POST",
+                                        collection + "?dryRun=All&fieldValidation=Strict", probe)
+    if stage == "baseline":
+        require(status == 201 and result.get("kind") == "Workload" and
+                result.get("metadata", {}).get("name") == name,
+                f"absent-webhook Workload dry-run did not pass: HTTP {status}")
+        evidence["native_admission"]["absent_webhook_dryrun_status"] = status
+    else:
+        message = str(result.get("message", ""))
+        lower = message.lower()
+        require(400 <= status < 500 and
+                'admission webhook "vworkload.kb.io" denied the request' in lower and
+                "location" in lower and "dfw" in lower and
+                not any(failure in lower for failure in
+                        ("failed calling webhook", "x509:", "no such host", "connection refused")),
+                f"native Workload validator did not semantically reject missing Location: HTTP {status}")
+        evidence["native_admission"]["validator_dryrun_status"] = status
+        evidence["native_admission"]["validator_hook"] = "vworkload.kb.io"
+        evidence["native_admission"]["denial_category"] = "missing genuine Location dfw"
+    absent()
+    after_status, after_list = milo_json_response(args.direct_milo_port, ca_file, token,
+                                                  "GET", collection)
+    require(after_status == 200 and
+            hashlib.sha256(json.dumps(after_list.get("items", []), sort_keys=True).encode())
+            .hexdigest() == before_hash,
+            "Project Workload collection changed after dry-run")
+    location_status, after_locations = milo_json_response(args.direct_milo_port, ca_file,
+                                                         token, "GET", location_path)
+    require(location_status == 200 and hashlib.sha256(json.dumps(
+            after_locations.get("items", []), sort_keys=True).encode()).hexdigest() ==
+            location_hash, "Project Locations changed during admission dry-run")
+    require(kjson(args.milo_kubeconfig, "milo-root", "get", "project", project)
+            ["metadata"]["uid"] == project_uid, "Project UID changed during admission probe")
+    evidence["native_admission"]["workload_persisted"] = False
+
+
 def probe_identities(args, private, snapshot, tokens, hub_config):
     ca_file = private / "milo-direct-ca.pem"
     private_write(ca_file, snapshot["milo_ca"].decode())
@@ -917,6 +1184,7 @@ def probe_identities(args, private, snapshot, tokens, hub_config):
         can_i(discovery, verb, resource, False)
     for verb, resource in (("get", "secrets"), ("list", "secrets"),
                            ("get", "workloads.compute.datumapis.com"),
+                           ("create", "workloads.compute.datumapis.com"),
                            ("create", "subjectaccessreviews.authorization.k8s.io")):
         can_i(project, verb, resource, True)
     for verb, resource in (("create", "secrets"), ("update", "secrets"),
@@ -1189,13 +1457,18 @@ def execute(args, private, contract, snapshot, preflight_seconds):
     GLOBAL_DEADLINE = time.monotonic() + 1800
     run_id = "apps-compute-management-" + secrets.token_hex(8)
     tokens = {user: secrets.token_urlsafe(48) for user in USERS}
+    if args.native_admission:
+        tokens[ADMISSION_USER] = secrets.token_urlsafe(48)
     original_csv = snapshot["auth_b64"]
     new_csv = append_auth(original_csv, tokens)
+    manager_csv = append_auth(original_csv, {user: tokens[user] for user in USERS})
     refs = []
     errors = []
     succeeded = False
     suspend_intent = False
     auth_intent = False
+    admission_retained = False
+    admission_stage_started = False
     direct = None
     host_proxy = ApiProxy(private, args.host_kubeconfig, args.host_context, "host")
     milo_proxy = ApiProxy(private, args.milo_kubeconfig, "milo-root", "milo")
@@ -1209,11 +1482,17 @@ def execute(args, private, contract, snapshot, preflight_seconds):
                 "nso_crd_source_revision": "sha1:" + NSO_SHA,
                 "compute_image": IMAGE, "arm64_manifest": ARM_MANIFEST,
                 "arm64_config": ARM_CONFIG,
-                "identity_mode": "three static Milo RBAC Users and two distinct short-lived Karmada ServiceAccounts",
+                "identity_mode": ("three static Milo RBAC Users, one optional admission installer User, "
+                                  "and two distinct short-lived Karmada ServiceAccounts"),
                 "project_uids": snapshot["projects"], "checks": [],
                 "preflight_seconds": round(preflight_seconds, 3),
                 "result": "incomplete", "cleanup": "pending",
                 "partial_management_cleanup": []}
+    if args.native_admission:
+        evidence["native_admission"] = {"mode": "source-rendered Milo registration, project dry-run only",
+                                        "workload_persisted": "unverified",
+                                        "project": PROJECTS[1],
+                                        "project_uid": snapshot["projects"][PROJECTS[1]]}
 
     def record(check):
         evidence["checks"].append(check)
@@ -1333,6 +1612,11 @@ def execute(args, private, contract, snapshot, preflight_seconds):
             plural = "clusterroles" if manifest["kind"] == "ClusterRole" else "clusterrolebindings"
             add("milo", json.loads(json.dumps(manifest)), None,
                 f"/apis/rbac.authorization.k8s.io/v1/{plural}/{manifest['metadata']['name']}")
+        if args.native_admission:
+            for manifest in admission_installer_manifests():
+                plural = "clusterroles" if manifest["kind"] == "ClusterRole" else "clusterrolebindings"
+                add("milo", manifest, None,
+                    f"/apis/rbac.authorization.k8s.io/v1/{plural}/{ADMISSION_USER}")
         auth_intent = True
         patch_auth(args, snapshot, original_csv, new_csv, private)
         restart_milo(args)
@@ -1341,6 +1625,10 @@ def execute(args, private, contract, snapshot, preflight_seconds):
         direct = DirectMilo(args, milo_ca_file)
         direct.start()
         probe_identities(args, private, snapshot, tokens, hub_probe_config)
+        admission_config = None
+        if args.native_admission:
+            admission_config = probe_admission_installer(args, private, snapshot,
+                                                         tokens[ADMISSION_USER])
         record("three distinct Milo Users and Karmada SA passed actual allow/deny probes before mounts")
 
         namespace = {"apiVersion": "v1", "kind": "Namespace",
@@ -1422,6 +1710,40 @@ def execute(args, private, contract, snapshot, preflight_seconds):
                  "all Compute replicas Ready and active Instance controller watch synchronized", 120)
         evidence["observed_management"] = management_state(args)
         record("native Compute management Flux, webhooks and actual pinned-image Pods Ready")
+        if args.native_admission:
+            # The management overlay already deploys these two source-rendered
+            # configurations to the host API. Milo owns a separate API server;
+            # register exact copies there with only the task-owned public CA.
+            admission_stage_started = True
+            admission_started = time.monotonic()
+            for kind, name in ADMISSION_NAMES.items():
+                require(optional(args.milo_kubeconfig, "milo-root", None,
+                                 kind.lower(), name) is None,
+                        f"Milo {kind}/{name} appeared before baseline; refusing adoption")
+            native_admission_probe(args, contract, snapshot, tokens, milo_ca_file,
+                                   run_id, "baseline", evidence)
+            record("absent Milo WCs: authenticated Project Workload dry-run admitted, no persistence")
+            for source_manifest in contract["admission_configs"]:
+                manifest = json.loads(json.dumps(source_manifest))
+                for hook in manifest["webhooks"]:
+                    hook["clientConfig"]["caBundle"] = base64.b64encode(webhook_ca).decode()
+                kind, name = manifest["kind"], manifest["metadata"]["name"]
+                path = MANAGEMENT_CLUSTER_PATHS[kind] + name
+                ref = reference(None, kind.lower(), name, path)
+                refs.append(("milo", ref))
+                create_owned(args, admission_config, "scoped", manifest, ref, run_id)
+                observed = optional(admission_config, "scoped", None, kind.lower(), name)
+                require(admission_observed_matches(manifest, observed, ref["uid"], run_id),
+                        f"Milo {kind}/{name} differs from pinned source plus public CA")
+            evidence["native_admission"]["public_ca_sha256"] = hashlib.sha256(webhook_ca).hexdigest()
+            evidence["native_admission"]["webhook_uids"] = {
+                ref["name"]: ref["uid"] for surface, ref in refs
+                if surface == "milo" and ref["name"] in ADMISSION_NAMES.values()}
+            native_admission_probe(args, contract, snapshot, tokens, milo_ca_file,
+                                   run_id, "registered", evidence)
+            evidence["native_admission"]["probe_seconds"] = round(
+                time.monotonic() - admission_started, 3)
+            record("Milo native fail-closed WCs: named Workload validator rejected absent genuine Location; no persistence")
         succeeded = True
     except Exception:
         try:
@@ -1438,6 +1760,60 @@ def execute(args, private, contract, snapshot, preflight_seconds):
         # Teardown has its own deadline even when the startup deadline expires.
         GLOBAL_DEADLINE = time.monotonic() + 600
         try:
+            admission_refs = [ref for surface, ref in refs if surface == "milo" and
+                              (ref["kind"], ref["name"]) in
+                              {(kind.lower(), name) for kind, name in ADMISSION_NAMES.items()}]
+            if admission_stage_started:
+                # Milo admission invokes the host manager with failurePolicy
+                # Fail. Preserve that manager and its CA unless both Milo
+                # registrations are certainly absent.
+                for ref in reversed(admission_refs):
+                    try:
+                        delete_owned(milo_proxy, args.milo_kubeconfig, "milo-root", ref, run_id)
+                    except Exception as exc:
+                        admission_retained = True
+                        errors.append(f"Milo admission {ref['kind']}/{ref['name']}: {exc}")
+                for kind, name in ADMISSION_NAMES.items():
+                    try:
+                        if optional(args.milo_kubeconfig, "milo-root", None,
+                                    kind.lower(), name) is not None:
+                            admission_retained = True
+                            errors.append(f"Milo {kind}/{name} remains after UID/RV cleanup")
+                    except Exception as exc:
+                        admission_retained = True
+                        errors.append(f"Milo {kind}/{name} absence unknown: {exc}")
+                if admission_retained:
+                    evidence["recovery"] = (
+                        "Native fail-closed Milo webhook absence unconfirmed. Host Compute manager, "
+                        "compute-system CA, runtime Flux, Milo core suspension, and hub CRDs "
+                        "are retained. Inspect exact Milo webhook UIDs and remove them before "
+                        "tearing down the manager or CA. Admission installer revocation is attempted "
+                        "separately; Karmada CRD installer access is also revoked. See cleanup errors.")
+                    raise RuntimeError("Milo admission removal incomplete; retaining manager and CA")
+                evidence["native_admission"]["milo_webhooks_absent_after_cleanup"] = True
+                if evidence["native_admission"].get("existing_workloads_sha256"):
+                    try:
+                        project = PROJECTS[1]
+                        root = f"{PROJECT_API}/{project}/control-plane"
+                        collection = root + "/apis/compute.datumapis.com/v1alpha/namespaces/default/workloads"
+                        token = tokens[USERS[1]]
+                        code, listing = milo_json_response(args.direct_milo_port, milo_ca_file,
+                                                           token, "GET", collection)
+                        current_hash = hashlib.sha256(json.dumps(
+                            listing.get("items", []), sort_keys=True).encode()).hexdigest()
+                        require(code == 200 and current_hash == evidence["native_admission"]
+                                ["existing_workloads_sha256"],
+                                "Project Workloads changed before final teardown")
+                        code, _ = milo_json_response(args.direct_milo_port, milo_ca_file, token,
+                                                     "GET", collection + "/" + evidence
+                                                     ["native_admission"]["probe_workload_name"])
+                        require(code == 404 and kjson(args.milo_kubeconfig, "milo-root",
+                                                      "get", "project", project)["metadata"]["uid"] ==
+                                snapshot["projects"][project],
+                                "probe Workload persisted or Project UID changed before teardown")
+                        evidence["native_admission"]["final_project_state_unchanged"] = True
+                    except Exception as exc:
+                        errors.append(f"native Project final-state verification: {exc}")
             # Stop the Flux-owned manager first. Even if its prune stalls,
             # revoke both runtime identities before the slower namespace and
             # source cleanup. An incomplete deletion is reported, not adopted.
@@ -1558,7 +1934,7 @@ def execute(args, private, contract, snapshot, preflight_seconds):
             for surface, ref in reversed(refs):
                 if (ref is runtime_ref or ref is hub_binding_ref or
                         ref is installer_binding_ref or ref is installer_secret_ref or
-                        ref in hub_crd_refs):
+                        ref in hub_crd_refs or ref in admission_refs):
                     continue
                 config, context, proxy = {
                     "host": (args.host_kubeconfig, args.host_context, host_proxy),
@@ -1619,7 +1995,31 @@ def execute(args, private, contract, snapshot, preflight_seconds):
             # alive merely because the normal cleanup deadline expired.
             # This is a separate bounded emergency revocation attempt; if
             # remote CRDs remain, the evidence stays failed/incomplete.
-            GLOBAL_DEADLINE = time.monotonic() + 60
+            GLOBAL_DEADLINE = time.monotonic() + (300 if admission_retained else 60)
+            if admission_retained and auth_intent:
+                # Keep manager identities for the retained serving path, but
+                # revoke the admission installer User and its binding.
+                try:
+                    current = kjson(args.host_kubeconfig, args.host_context, "get", "secret",
+                                    "milo-apiserver-auth-tokens", "-n", "milo-system")
+                    if current["data"]["tokens.csv"] == new_csv:
+                        patch_auth(args, snapshot, new_csv, manager_csv, private)
+                        restart_milo(args)
+                    else:
+                        require(current["data"]["tokens.csv"] == manager_csv,
+                                "Milo token CSV changed; admission installer revocation refused")
+                    evidence["native_admission"]["installer_token_revoked_after_retention"] = True
+                except Exception as exc:
+                    errors.append(f"retained-stage admission installer token revocation: {exc}")
+                for kind in ("clusterrolebinding", "clusterrole"):
+                    ref = next((item for surface, item in refs if surface == "milo" and
+                                item["kind"] == kind and item["name"] == ADMISSION_USER), None)
+                    if ref is not None:
+                        try:
+                            delete_owned(milo_proxy, args.milo_kubeconfig, "milo-root",
+                                         ref, run_id)
+                        except Exception as exc:
+                            errors.append(f"retained-stage admission {kind} revocation: {exc}")
             for surface, kind, name, config, context, proxy in (
                     ("hub", "clusterrolebinding", INSTALLER_SA,
                      args.karmada_admin_kubeconfig, args.karmada_admin_context, hub_proxy),
@@ -1647,7 +2047,10 @@ def execute(args, private, contract, snapshot, preflight_seconds):
             print(f"Non-secret Compute management evidence: {evidence_path}", flush=True)
         require(not errors, "Compute management cleanup incomplete: " + "; ".join(errors))
     require(succeeded, "Compute management startup did not complete")
-    print("Compute management startup PASS; scoped identities and native runtime removed", flush=True)
+    if args.native_admission:
+        print("Compute management plus native Milo admission dry-run PASS; scoped identities and runtime removed", flush=True)
+    else:
+        print("Compute management startup PASS; scoped identities and native runtime removed", flush=True)
 
 
 def main():
@@ -1656,6 +2059,8 @@ def main():
     parser.add_argument("--nso-source", type=Path, required=True)
     parser.add_argument("--offline", action="store_true", help="verify exact source/render only")
     parser.add_argument("--execute", action="store_true", help="run reviewed isolated fixture")
+    parser.add_argument("--native-admission", action="store_true",
+                        help="opt in to real Milo native webhook registration and Project dry-run comparison")
     parser.add_argument("--fault-invalid-runtime", action="store_true",
                         help="inject a rejected Deployment to prove partial-apply cleanup; exits nonzero")
     parser.add_argument("--host-kubeconfig", type=Path)
@@ -1670,6 +2075,8 @@ def main():
     parser.add_argument("--direct-milo-port", type=int, default=41445)
     args = parser.parse_args()
     require(not args.fault_invalid_runtime or args.execute, "fault injection requires --execute")
+    require(not (args.fault_invalid_runtime and args.native_admission),
+            "fault injection and native admission are mutually exclusive")
     require(not (args.offline and args.execute), "--offline and --execute are mutually exclusive")
     old_umask = os.umask(0o077)
     try:
@@ -1677,7 +2084,8 @@ def main():
             private = Path(directory)
             contract = source_contract(args)
             if args.offline:
-                print("Compute management offline source/render/RBAC contract PASS", flush=True)
+                mode = "Compute management plus native admission" if args.native_admission else "Compute management"
+                print(f"{mode} offline source/render/RBAC contract PASS", flush=True)
                 return
             for name in ("host_kubeconfig", "host_context", "milo_kubeconfig",
                          "hub_host_kubeconfig", "hub_host_context",
