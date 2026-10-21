@@ -240,3 +240,9 @@ The helper's comments record checksum sources. Kind uses the verified v1.32.0
 multi-platform node index `sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027`.
 The standard private runner's actual memory and disk are logged; no larger
 runner capacity or successful Linux execution is assumed from local allocation.
+
+The source contract also rejects changes to runtime build inputs after the
+published binary revision, before manifest rendering or cluster access. A
+future controller change cannot receive a green native trial by exercising an
+older image. Its image and runner pins must first be updated together. A new
+failure regression covers that rejection; the offline total is now thirty.

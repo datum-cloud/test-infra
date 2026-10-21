@@ -238,6 +238,18 @@ class CLIIntegrationGatesTest(unittest.TestCase):
         request.assert_not_called()
 
 
+class RuntimeSourcePinTest(unittest.TestCase):
+    def test_new_runtime_source_cannot_pass_with_an_older_published_image(self):
+        revision = "b" * 40
+        commands = SimpleNamespace(run=mock.Mock(side_effect=[
+            revision, "", "", "internal/templatecontroller/controller.go"]))
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(trial, "render") as render:
+                with self.assertRaisesRegex(RuntimeError, "runtime differs from published image"):
+                    trial.source_contract(commands, Path(directory).resolve(), revision)
+                render.assert_not_called()
+
+
 class PlatformPinTest(unittest.TestCase):
     def test_exact_multiarch_evidence_rejects_changed_amd64_digest(self):
         def platform(architecture):

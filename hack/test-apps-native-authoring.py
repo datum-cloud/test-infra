@@ -115,6 +115,12 @@ def source_contract(commands: Commands, source: Path, revision: str) -> dict:
     require(commands.run("git", "-C", str(source), "merge-base", "--is-ancestor",
                          APPS_BINARY_SHA, revision) == "",
             "published Apps binary source is not an ancestor of config revision")
+    runtime_changes = commands.run(
+        "git", "-C", str(source), "diff", "--name-only", APPS_BINARY_SHA, revision,
+        "--", "Dockerfile", ".dockerignore", "go.mod", "go.sum",
+        "cmd/apps-controller", "internal", "pkg")
+    require(not runtime_changes,
+            "Apps runtime differs from published image source; publish and pin the new runtime")
     config_hash, config_count = tree_fingerprint(source / "config")
     crds = render(commands, source / "config/crd")
     require({key(item) for item in crds} ==
