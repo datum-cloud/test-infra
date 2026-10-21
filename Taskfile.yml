@@ -486,6 +486,8 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_native_kata_prerequisite.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_kata_netns_candidate.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_kata_netns_candidate.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/test_runtimeclass_project_candidate.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_runtimeclass_project_candidate.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_guard_quota.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_harness.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_flux_prune.py' -v

@@ -1,0 +1,16 @@
+{
+  "compute": {
+    "sourceRevision": "88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+    "crd": "runtimeclasses.compute.datumapis.com",
+    "crdFile": "config/base/crd/bases/compute.datumapis.com_runtimeclasses.yaml",
+    "crdFileSha256": "6165f81277aa181c1e50247a8f10e7cd4181b0da17ce65c5dc668b56bade8929",
+    "schemaCanonicalSha256": "351d7dfc2b6b077cd4e316f3f2e086dcf090583c9010595ddf6524096196d2db"
+  },
+  "flux": {
+    "version": "v2.7.5",
+    "tagCommit": "9ecc22ab10ca3940c694c7f4c79f6168e879195e",
+    "crd": "kustomizations.kustomize.toolkit.fluxcd.io",
+    "crdCanonicalSha256": "62ee3d8b7dd968c3352a54156abd0e342c044dafc34c9de47a979a55a9c560ad",
+    "schemaCanonicalSha256": "eddbfa4ff013fc594ed1f91126e1816cd1f87d7f515fa3bbf6f07550ec8cbcb0"
+  }
+}

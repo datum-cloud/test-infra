@@ -66,6 +66,72 @@ also verify that a container with an unsupported interface/route cannot be
 mistaken for a successful guest attachment. No live resources are created by
 this candidate or its offline tests.
 
+## Project catalog publication candidate
+
+At Milo revision `200de48a305732720377cb83308d57c84fd5f688`, the provider
+RuntimeClass cannot be published only in Milo's Platform storage
+and assumed visible in a Project API. Milo's Project router selects a separate
+per-Project storage prefix (`pkg/server/filters/projects.go` and
+`internal/apiserver/storage/project/mux.go`). The discovery annotation on
+the CRD controls discovery visibility; it does not copy catalog objects across
+those prefixes. Compute's workload webhook and WorkloadDeployment controller
+at Compute revision `88a7101c2b91f7195c2bb5433c50f54c384a90ce` read RuntimeClasses
+using the engaged Project client (`internal/webhook/v1alpha/workload_webhook.go`
+and `internal/controller/workload_controller.go`). Compute currently has an
+InstanceType projector, but no RuntimeClass projector. The Project therefore
+needs an explicit, platform-owned Project-scoped provisioning step.
+
+`components/apps-native-kata-runtimeclass-project` is an offline candidate for
+the single fixture Project `apps-a1t-consumer-a`. It points Flux at the pinned
+provider bundle's source-owned `components/runtime_classes` Kustomize
+Component and changes only `spec.networkAttachment` from
+`HypervisorDeclared` to `Netns`. It is deliberately `suspend: true`, absent
+from all default cluster roots, and references a Secret that is not provided.
+The candidate carries bootstrap sentinels for the Project endpoint and UID; it
+cannot be activated until a future fixture bootstrap verifies that Project's
+UID and creates `apps-a1t-runtimeclass-project-kubeconfig` for the exact
+Project endpoint. No credential is included in this repository.
+
+That future identity must be a no-impersonation static Milo identity limited to
+`compute.datumapis.com/runtimeclasses` operations needed by Flux (`get`, `list`,
+`watch`, `create`, `patch`, and `delete`). Milo's static-token/RBAC fixture does
+not provide a Project-only boundary for that GVR: the endpoint pins this one
+fixture route, but the credential's matching GVR rights can also be used against
+other Project routes. This limitation makes the candidate unsuitable as a
+production delegation mechanism.
+
+No status is fabricated. Compute treats missing or Unknown RuntimeClass
+availability as Pending and allows it during provider rollout; it rejects only
+a class whose Available condition is False
+(`internal/validation/runtimeclass_validation.go:87-99`,
+`pkg/runtimeclass/catalog.go:101-118`). This candidate does not claim that the
+provider currently reports an Available condition.
+
+The rendered catalog alone also does not make the real cell placeable. Compute
+selects Karmada cells using both the Location label and
+`compute.datumapis.com/runtime-class.general-purpose=true`
+(`internal/controller/workloaddeployment_federator.go:470-474,838-844`). The
+provider candidate does not publish that label, and the pinned provider
+controller does not write the Karmada Cluster object. A later real Compute
+placement trial needs a source-owned cell-serving signal that is set only after
+the provider is verified ready; manually adding the label would not prove that
+path.
+
+The candidate is not a supported or runnable root. Its offline contract test
+checks that it remains suspended and that the source-owned Component is wrapped
+through Flux. To render it against the pinned provider artifact at revision
+`9578d304201428f6d7370460b4a6e9933ef1b25f` in the review
+environment, use:
+
+```sh
+python3 hack/render_runtimeclass_project_candidate.py \
+  --provider-layout /path/to/apps-kata-provider-oci-layout \
+  --compute-source /path/to/clean-compute-88a7101-source \
+  --output /tmp/runtimeclass-candidate.yaml
+```
+
+The renderer requires a clean Compute checkout at `88a7101c2b91f7195c2bb5433c50f54c384a90ce`, verifies the source CRD file SHA-256 in `schema-lock.json`, derives the RuntimeClass schema from that CRD, and strictly validates the rendered object with zero skips. It also renders the repository-pinned Flux v2.7.5 installer CRD and checks its locked Kustomization schema hash before validating the suspended Flux object. The optional output file is written only after validation succeeds. This proves only that the source-owned provider component produces one RuntimeClass and the candidate patch changes only `networkAttachment`; it does not prove a Milo credential, Project admission, catalog availability, cell placement, guest interface attachment, or HTTP traffic.
+
 The source and registry pins for this comparison are kept in
 [`network-contract-lock.json`](../components/apps-native-kata-netns/network-contract-lock.json).
 The immutable provider and NSO image/bundle digests were read from their OCI
@@ -107,3 +173,9 @@ The full offline suite passed 105 tests. The first sandbox-only schema fetch
 failed on restricted network access; the read-only schema-download retry passed.
 The misplaced RuntimeClass patch was caught by rendering before any deployment
 and removed. No RuntimeClass publication or live networking result is claimed.
+
+Independent lead verification on 2026-10-21 repeated the full offline suite and
+the artifact-backed renderer. Both the one RuntimeClass and one Flux
+Kustomization passed strict source-schema validation with zero skipped objects.
+The rendered RuntimeClass is 2,904 bytes; validation does not make this
+suspended candidate a supported deployable root or prove live admission.

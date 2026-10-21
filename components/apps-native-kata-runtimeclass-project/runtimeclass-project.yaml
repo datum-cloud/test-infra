@@ -1,0 +1,43 @@
+# Offline-only fixture candidate. Keep suspended until a bootstrap creates a
+# Project-verified, no-impersonation kubeconfig Secret with the documented
+# RuntimeClass-only permissions. This Kustomization is not in cluster roots.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-a1t-kata-runtimeclass-project
+  namespace: flux-system
+  annotations:
+    test-infra.datumapis.com/candidate-project-name: apps-a1t-consumer-a
+    test-infra.datumapis.com/candidate-project-endpoint: BOOTSTRAP_REQUIRED
+    test-infra.datumapis.com/candidate-project-uid: BOOTSTRAP_REQUIRED
+    test-infra.datumapis.com/candidate-state: suspended-no-credential
+spec:
+  suspend: true
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  dependsOn:
+    - name: compute-a1t-management
+      namespace: flux-system
+  sourceRef:
+    kind: OCIRepository
+    name: apps-a1t-kata-provider
+  path: ./components/runtime_classes
+  kubeConfig:
+    secretRef:
+      name: apps-a1t-runtimeclass-project-kubeconfig
+      key: kubeconfig
+  patches:
+    - target:
+        group: compute.datumapis.com
+        version: v1alpha
+        kind: RuntimeClass
+        name: general-purpose
+      patch: |-
+        apiVersion: compute.datumapis.com/v1alpha
+        kind: RuntimeClass
+        metadata:
+          name: general-purpose
+        spec:
+          networkAttachment: Netns
