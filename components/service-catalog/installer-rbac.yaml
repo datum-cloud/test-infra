@@ -1,0 +1,60 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-catalog-installer
+rules:
+  # Kubernetes RBAC cannot resourceName-scope create. The dedicated test User
+  # can create only these two API kinds; all later writes are exact-name bound.
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [create, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    resourceNames:
+      - locationclasses.locations.miloapis.com
+      - locations.locations.miloapis.com
+      - servinglocations.locations.miloapis.com
+      - serviceactivationrequests.services.miloapis.com
+      - serviceagentconfigurations.services.miloapis.com
+      - serviceagents.services.miloapis.com
+      - serviceavailabilities.services.miloapis.com
+      - serviceconfigurations.services.miloapis.com
+      - serviceconsumers.services.miloapis.com
+      - serviceentitlements.services.miloapis.com
+      - services.services.miloapis.com
+      - billingaccountbindings.billing.miloapis.com
+      - billingaccounts.billing.miloapis.com
+      - billingarrangements.billing.miloapis.com
+      - billingentitlements.billing.miloapis.com
+      - invoices.billing.miloapis.com
+      - meterdefinitions.billing.miloapis.com
+      - monitoredresourcetypes.billing.miloapis.com
+      - offers.billing.miloapis.com
+      - paymentmethodclasses.billing.miloapis.com
+      - paymentmethods.billing.miloapis.com
+      - servicepricings.billing.miloapis.com
+    verbs: [get, patch, update, delete]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations]
+    verbs: [create, list, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations]
+    resourceNames: [services-mutating]
+    verbs: [get, patch, update, delete]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    resourceNames: [services-validating]
+    verbs: [get, patch, update, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-catalog-installer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-catalog-installer
+subjects:
+  - kind: User
+    name: apps-a1t-catalog-installer
+    apiGroup: rbac.authorization.k8s.io
