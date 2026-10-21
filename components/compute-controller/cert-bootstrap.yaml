@@ -1,0 +1,36 @@
+# Task-owned CA for the pinned Compute manager's CSI webhook certificate.
+# These namespaced resources are created by the bounded isolated fixture and
+# deleted with its owned compute-system Namespace after the manager is gone.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: compute-a1t-selfsigned
+  namespace: compute-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: compute-a1t-webhook-ca
+  namespace: compute-system
+spec:
+  isCA: true
+  commonName: compute-a1t-webhook-ca
+  secretName: compute-a1t-webhook-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: compute-a1t-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: compute-a1t-webhook-ca
+  namespace: compute-system
+spec:
+  ca:
+    secretName: compute-a1t-webhook-ca

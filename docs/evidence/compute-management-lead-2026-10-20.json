@@ -1,0 +1,89 @@
+{
+  "run_id": "apps-compute-management-a2cc3a443389463b",
+  "source_revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+  "nso_crd_source_revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+  "compute_image": "ghcr.io/datum-cloud/compute@sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679",
+  "arm64_manifest": "sha256:d288691dee2c3935712fe70e3f4b43af063c16db27bd7bc9ab38b1951ec3ba77",
+  "arm64_config": "sha256:5d230dc6141ad919d653540d6a23ed2ac5b679622a1acbbb890d1f14a0bc98ae",
+  "identity_mode": "three static Milo RBAC Users and two distinct short-lived Karmada ServiceAccounts",
+  "project_uids": {
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0",
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30"
+  },
+  "checks": [
+    "offline exact source and live read-only prerequisite/collision preflight",
+    "hub CRD installer has only exact-name CRD change grants and passed denials",
+    "two remote Flux source bundles installed exact 16 hub CRD schemas",
+    "Karmada upstream ClusterRole bound only to fresh short-lived ServiceAccount",
+    "three distinct Milo Users and Karmada SA passed actual allow/deny probes before mounts",
+    "task-owned cert-manager CA Certificate and CA Issuer Ready; public CA verified",
+    "native Compute management Flux, webhooks and actual pinned-image Pods Ready"
+  ],
+  "preflight_seconds": 3.702,
+  "result": "pass",
+  "cleanup": "complete",
+  "partial_management_cleanup": [],
+  "observed_hub_crds": {
+    "revisions": {
+      "compute-a1t-controller": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "compute-a1t-hub-nso-source": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "compute-a1t-hub-compute-crds": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "compute-a1t-hub-nso-crds": "sha1:79245f00d6220c128df3d024475ff7b1566ce305"
+    },
+    "schema_hashes": {
+      "instanceconsolesessions.compute.datumapis.com": "d3107f43691590dbf0e60f7d3290021d03d00d18e8d71ec217d7ac5cf3fadb08",
+      "instances.compute.datumapis.com": "502505981f8fb8679fbd89ff8fca583213a8c408ddec4f7b4235225dd3b18f6f",
+      "instancetypes.compute.datumapis.com": "e82e80bddbdae1f4208651724fa55e3ea3895356283937c75cf873afcf8734a3",
+      "runtimeclasses.compute.datumapis.com": "abe8a33bd12096fca5f819db6bc8f12b69edf265b0f0e49a756ef289e95c3c5d",
+      "workloaddeployments.compute.datumapis.com": "1bdd66d483043b6374084670788de265e2f028d7a9be10b2195dead46004937c",
+      "workloads.compute.datumapis.com": "615e5bcd6d2e6e31b61bdb642599686f612f03a5f9caf2abd7cd9a27b36b9618",
+      "connectors.networking.datumapis.com": "e951743746e79b67c415bfc3b754ab62665a6c719f627f3fd01c59460e23a8fd",
+      "edgereachabilities.networking.datumapis.com": "dfe2384d5442028cbdfdcd06ca15ce2ad03e1c63fce204c9c0b1f23ccd382a18",
+      "httpproxies.networking.datumapis.com": "a03faa2b5a77373610ba9000c95b70f8eddaeee498cd42947e7e26ab90fa8c00",
+      "networkbindings.networking.datumapis.com": "2fb532967dc32881c399573465c66f93797a8b3af05ae4072b4d29c77268f31f",
+      "networkcontexts.networking.datumapis.com": "c9096bcc375aba957eb5c2ba9a2e99fbf28e2cf1c523eeb3b93743a826244afe",
+      "networkinterfaceclaims.networking.datumapis.com": "cd5252be09ecbabe9a8e355906955ffd6999204a57b6c87edaeccddea73b2696",
+      "networkinterfaces.networking.datumapis.com": "230cad6bcce1ae2ffff9a3a8cdb2e09f3868bb281aae0c6f6fbe8f5253c886d6",
+      "networks.networking.datumapis.com": "1ea0551a5479a2511f6f83c40674386900d4e02cc88408ad0460b7fd44d0c775",
+      "subnets.networking.datumapis.com": "c6f7bb5d8bcecfb4004af0e5e7bb400a702eb4cbe0d82aa1b058439baa516a82",
+      "trafficprotectionpolicies.networking.datumapis.com": "cb69b40a49158c1815580d67c767699f00e8e533da37bfd3d8d8ea56b19f0f2c"
+    },
+    "crd_uids": {
+      "instanceconsolesessions.compute.datumapis.com": "aeb8f52f-3bf5-43d3-b08c-269236768519",
+      "instances.compute.datumapis.com": "cdcbefa3-9da4-4fd7-9e4c-e00965f81121",
+      "instancetypes.compute.datumapis.com": "6d5b6bf2-85e7-4f26-9633-047e043d6e97",
+      "runtimeclasses.compute.datumapis.com": "18b87de3-5043-4667-80ad-eb6323240a7e",
+      "workloaddeployments.compute.datumapis.com": "369d0f2d-23e7-4ebd-88b0-ed4ea3008094",
+      "workloads.compute.datumapis.com": "2bfa15ac-4f29-4e19-bbd1-1057c7a30f0c",
+      "edgereachabilities.networking.datumapis.com": "86e0b679-9ef5-4ffb-bcfc-0e7c978d2bc5",
+      "trafficprotectionpolicies.networking.datumapis.com": "c6773e1c-4a0b-4c54-a4df-eaa025705f24",
+      "httpproxies.networking.datumapis.com": "33a82da0-2c3d-41df-959a-fcb99a4394ff",
+      "connectors.networking.datumapis.com": "245278e9-3c21-42db-a3af-9b34d8ea6641",
+      "networkbindings.networking.datumapis.com": "6c9f555a-42d3-40c0-8ff5-bd2d16331d2f",
+      "networkcontexts.networking.datumapis.com": "837b2605-85bb-41f6-8ea8-0ce40851c105",
+      "networks.networking.datumapis.com": "06729fbc-b950-4d50-a88d-58dd73e9082d",
+      "networkinterfaceclaims.networking.datumapis.com": "0624111d-1379-43ab-8a4c-7a3eadfd90a4",
+      "networkinterfaces.networking.datumapis.com": "3df6c281-b904-4ffe-9270-720ee7b38075",
+      "subnets.networking.datumapis.com": "cd14f51b-30bc-4da8-a420-d1cc5bd25890"
+    }
+  },
+  "webhook_ca_public_sha256": "50ce7529476d78dedc556fdba7140777da12d5fa61621f9e8301d9195057a85d",
+  "observed_management": {
+    "source_revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+    "runtime_revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+    "deployment_uid": "6b770ec6-8ccf-4f5c-acfd-8021d1a576bc",
+    "pod_image_ids": {
+      "ea7bd593-bce5-4ab4-b7e1-25ee68160953": "docker.io/library/import-2026-10-21@sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679",
+      "1666affa-7df6-4805-9271-f976c8086677": "docker.io/library/import-2026-10-21@sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679"
+    },
+    "watch_sync": {
+      "milo": "Pod /readyz includes project-discovery-synced and projects-engaged",
+      "hub": "instance-projector Starting workers follows source.Kind cache sync"
+    }
+  },
+  "startup_seconds": 116.044,
+  "hub_crds_absent_after_cleanup": true,
+  "cleanup_seconds": 37.343,
+  "total_seconds": 157.089
+}

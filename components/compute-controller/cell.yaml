@@ -34,13 +34,16 @@ spec:
         - op: test
           path: /spec/template/spec/volumes/0/name
           value: quota-credentials
+        - op: add
+          path: /spec/template/spec/securityContext/fsGroup
+          value: 65532
         - op: replace
           path: /spec/template/spec/volumes/0
           value:
             name: quota-credentials
             secret:
               secretName: compute-a1t-quota-kubeconfig
-              defaultMode: 0400
+              defaultMode: 0440
               items:
                 - key: kubeconfig
                   path: kubeconfig

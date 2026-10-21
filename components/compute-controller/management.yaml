@@ -11,6 +11,8 @@ spec:
   dependsOn:
     - name: compute-a1t-milo-api-crds
       namespace: milo-system
+    - name: compute-a1t-hub-compute-crds
+    - name: compute-a1t-hub-nso-crds
   sourceRef:
     kind: GitRepository
     name: compute-a1t-controller
@@ -22,6 +24,17 @@ spec:
   # are the only omitted upstream resources: optional observability CRs and
   # their generated JSON ConfigMaps, which this test cluster does not install.
   patches:
+    - target:
+        group: resourcemetrics.miloapis.com
+        version: v1alpha1
+        kind: ResourceMetricsPolicy
+        name: compute-metrics
+      patch: |-
+        apiVersion: resourcemetrics.miloapis.com/v1alpha1
+        kind: ResourceMetricsPolicy
+        metadata:
+          name: compute-metrics
+        $patch: delete
     - target:
         group: grafana.integreatly.org
         version: v1beta1
@@ -103,12 +116,14 @@ spec:
         spec:
           template:
             spec:
+              securityContext:
+                fsGroup: 65532
               volumes:
                 - name: downstream-kubeconfig
                   configMap: null
                   secret:
                     secretName: compute-a1t-karmada-kubeconfig
-                    defaultMode: 0400
+                    defaultMode: 0440
                     items:
                       - key: kubeconfig
                         path: downstream-kubeconfig.yaml
@@ -117,27 +132,29 @@ spec:
                 - name: milo-discovery-credentials
                   secret:
                     secretName: compute-a1t-milo-discovery-kubeconfig
-                    defaultMode: 0400
+                    defaultMode: 0440
                     items:
                       - key: kubeconfig
                         path: kubeconfig
                 - name: milo-project-credentials
                   secret:
                     secretName: compute-a1t-milo-project-kubeconfig
-                    defaultMode: 0400
+                    defaultMode: 0440
                     items:
                       - key: kubeconfig
                         path: kubeconfig
                 - name: quota-credentials
                   secret:
                     secretName: compute-a1t-quota-kubeconfig
-                    defaultMode: 0400
+                    defaultMode: 0440
                     items:
                       - key: kubeconfig
                         path: kubeconfig
               containers:
                 - name: manager
                   volumeMounts:
+                    - mountPath: /etc/kubernetes/karmada-token
+                      $patch: delete
                     - name: milo-discovery-credentials
                       mountPath: /etc/milo-discovery
                       readOnly: true
@@ -147,6 +164,27 @@ spec:
                     - name: quota-credentials
                       mountPath: /etc/quota-credentials
                       readOnly: true
+    # Compute's source CSI component deliberately leaves issuer selection to
+    # the consumer. This fixture provisions a task-owned CA Issuer below.
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: compute-manager
+      patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: compute-manager
+        spec:
+          template:
+            spec:
+              volumes:
+                - name: webhook-server-tls
+                  csi:
+                    volumeAttributes:
+                      csi.cert-manager.io/issuer-kind: Issuer
+                      csi.cert-manager.io/issuer-name: compute-a1t-webhook-ca
     - target:
         version: v1
         kind: ConfigMap

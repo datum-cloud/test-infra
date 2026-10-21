@@ -1,0 +1,201 @@
+{
+  "run_id": "apps-compute-management-53e4542d13816452",
+  "source_revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+  "nso_crd_source_revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+  "compute_image": "ghcr.io/datum-cloud/compute@sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679",
+  "arm64_manifest": "sha256:d288691dee2c3935712fe70e3f4b43af063c16db27bd7bc9ab38b1951ec3ba77",
+  "arm64_config": "sha256:5d230dc6141ad919d653540d6a23ed2ac5b679622a1acbbb890d1f14a0bc98ae",
+  "identity_mode": "three static Milo RBAC Users and two distinct short-lived Karmada ServiceAccounts",
+  "project_uids": {
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0",
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30"
+  },
+  "checks": [
+    "offline exact source and live read-only prerequisite/collision preflight",
+    "hub CRD installer has only exact-name CRD change grants and passed denials",
+    "two remote Flux source bundles installed exact 16 hub CRD schemas",
+    "Karmada upstream ClusterRole bound only to fresh short-lived ServiceAccount",
+    "three distinct Milo Users and Karmada SA passed actual allow/deny probes before mounts"
+  ],
+  "preflight_seconds": 3.475,
+  "result": "fail",
+  "cleanup": "complete",
+  "partial_management_cleanup": [
+    {
+      "kind": "clusterrole",
+      "name": "compute",
+      "uid": "56ac9be6-380f-4f4d-8067-400969bdece1"
+    },
+    {
+      "kind": "clusterrole",
+      "name": "compute-metrics-auth-role",
+      "uid": "96221234-d082-4788-9edf-a975e7ec8975"
+    },
+    {
+      "kind": "clusterrole",
+      "name": "compute-metrics-reader",
+      "uid": "a883ad1d-b6ba-424c-aa2f-f1e5ecd048fd"
+    },
+    {
+      "kind": "clusterrole",
+      "name": "compute-workload-editor-role",
+      "uid": "10342802-efd2-4ee5-ae17-3049063b5d04"
+    },
+    {
+      "kind": "clusterrole",
+      "name": "compute-workload-viewer-role",
+      "uid": "b9cb8f02-9247-4f9b-a133-ab4cb4ddad0e"
+    },
+    {
+      "kind": "clusterrole",
+      "name": "compute-workloaddeployment-editor-role",
+      "uid": "aadd5db7-18d1-4307-a7dd-e1fdcf9ec7ea"
+    },
+    {
+      "kind": "clusterrole",
+      "name": "compute-workloaddeployment-viewer-role",
+      "uid": "d96b6b1d-117e-462e-a5c7-21f300cc5144"
+    }
+  ],
+  "observed_hub_crds": {
+    "revisions": {
+      "compute-a1t-controller": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "compute-a1t-hub-nso-source": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "compute-a1t-hub-compute-crds": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "compute-a1t-hub-nso-crds": "sha1:79245f00d6220c128df3d024475ff7b1566ce305"
+    },
+    "schema_hashes": {
+      "instanceconsolesessions.compute.datumapis.com": "d3107f43691590dbf0e60f7d3290021d03d00d18e8d71ec217d7ac5cf3fadb08",
+      "instances.compute.datumapis.com": "502505981f8fb8679fbd89ff8fca583213a8c408ddec4f7b4235225dd3b18f6f",
+      "instancetypes.compute.datumapis.com": "e82e80bddbdae1f4208651724fa55e3ea3895356283937c75cf873afcf8734a3",
+      "runtimeclasses.compute.datumapis.com": "abe8a33bd12096fca5f819db6bc8f12b69edf265b0f0e49a756ef289e95c3c5d",
+      "workloaddeployments.compute.datumapis.com": "1bdd66d483043b6374084670788de265e2f028d7a9be10b2195dead46004937c",
+      "workloads.compute.datumapis.com": "615e5bcd6d2e6e31b61bdb642599686f612f03a5f9caf2abd7cd9a27b36b9618",
+      "connectors.networking.datumapis.com": "e951743746e79b67c415bfc3b754ab62665a6c719f627f3fd01c59460e23a8fd",
+      "edgereachabilities.networking.datumapis.com": "dfe2384d5442028cbdfdcd06ca15ce2ad03e1c63fce204c9c0b1f23ccd382a18",
+      "httpproxies.networking.datumapis.com": "a03faa2b5a77373610ba9000c95b70f8eddaeee498cd42947e7e26ab90fa8c00",
+      "networkbindings.networking.datumapis.com": "2fb532967dc32881c399573465c66f93797a8b3af05ae4072b4d29c77268f31f",
+      "networkcontexts.networking.datumapis.com": "c9096bcc375aba957eb5c2ba9a2e99fbf28e2cf1c523eeb3b93743a826244afe",
+      "networkinterfaceclaims.networking.datumapis.com": "cd5252be09ecbabe9a8e355906955ffd6999204a57b6c87edaeccddea73b2696",
+      "networkinterfaces.networking.datumapis.com": "230cad6bcce1ae2ffff9a3a8cdb2e09f3868bb281aae0c6f6fbe8f5253c886d6",
+      "networks.networking.datumapis.com": "1ea0551a5479a2511f6f83c40674386900d4e02cc88408ad0460b7fd44d0c775",
+      "subnets.networking.datumapis.com": "c6f7bb5d8bcecfb4004af0e5e7bb400a702eb4cbe0d82aa1b058439baa516a82",
+      "trafficprotectionpolicies.networking.datumapis.com": "cb69b40a49158c1815580d67c767699f00e8e533da37bfd3d8d8ea56b19f0f2c"
+    },
+    "crd_uids": {
+      "instanceconsolesessions.compute.datumapis.com": "e21fab3a-17cb-47b8-a899-61c81195e927",
+      "instances.compute.datumapis.com": "f5a69a07-2799-4d53-b51a-2fd3fe891cbe",
+      "instancetypes.compute.datumapis.com": "9a662d65-2a46-4e45-82c4-6ddef387d1a7",
+      "runtimeclasses.compute.datumapis.com": "f3b73446-4deb-4586-92ac-2f98279f892f",
+      "workloaddeployments.compute.datumapis.com": "7fbdfc05-d490-487f-b01b-90a5381eeffc",
+      "workloads.compute.datumapis.com": "78071f4f-5eba-4b49-af74-2c71e3fe25ba",
+      "edgereachabilities.networking.datumapis.com": "cb44392e-bde2-4cde-a70d-a9f27ca641c7",
+      "trafficprotectionpolicies.networking.datumapis.com": "eb338d6b-9a86-4cac-87c9-e7edc2f71124",
+      "httpproxies.networking.datumapis.com": "8b2dee98-7c0e-4fc6-b584-d2ade9f0e118",
+      "connectors.networking.datumapis.com": "dca7ecc7-dce4-4524-92dd-b26f9d280842",
+      "networkbindings.networking.datumapis.com": "6ac64139-69d8-410a-b530-3b40546083e3",
+      "networkcontexts.networking.datumapis.com": "53147918-c08f-47b6-861f-9e4e518535f3",
+      "networks.networking.datumapis.com": "b3dfbe5f-fdd5-4b5d-a2cf-a346538a43e1",
+      "networkinterfaceclaims.networking.datumapis.com": "19fbead0-8f7b-4494-a28b-55cc7ce2ede0",
+      "networkinterfaces.networking.datumapis.com": "ece87b89-62ae-44f1-b3b1-91730a705f1e",
+      "subnets.networking.datumapis.com": "46516a1a-335a-4ef0-b791-a688cfcdcd2d"
+    }
+  },
+  "failure_diagnostics": {
+    "compute_hub_crds": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "ReconciliationSucceeded",
+          "message": "Applied revision: sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce"
+        }
+      ]
+    },
+    "compute_source": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce'"
+        },
+        {
+          "type": "ArtifactInStorage",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce'"
+        }
+      ]
+    },
+    "nso_hub_crds": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "ReconciliationSucceeded",
+          "message": "Applied revision: sha1:79245f00d6220c128df3d024475ff7b1566ce305"
+        }
+      ]
+    },
+    "nso_source": {
+      "generation": 1,
+      "observed_generation": 1,
+      "revision": "sha1:79245f00d6220c128df3d024475ff7b1566ce305",
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:79245f00d6220c128df3d024475ff7b1566ce305'"
+        },
+        {
+          "type": "ArtifactInStorage",
+          "status": "True",
+          "reason": "Succeeded",
+          "message": "stored artifact for revision 'sha1:79245f00d6220c128df3d024475ff7b1566ce305'"
+        }
+      ]
+    },
+    "management": {
+      "generation": 1,
+      "observed_generation": -1,
+      "revision": null,
+      "conditions": [
+        {
+          "type": "Reconciling",
+          "status": "True",
+          "reason": "ProgressingWithRetry",
+          "message": "Detecting drift for revision sha1:88a7101c2b91f7195c2bb5433c50f54c384a90ce with a timeout of 5m0s"
+        },
+        {
+          "type": "Ready",
+          "status": "False",
+          "reason": "ReconciliationFailed",
+          "message": "ResourceMetricsPolicy/compute-system/compute-metrics dry-run failed: no matches for kind \"ResourceMetricsPolicy\" in version \"resourcemetrics.miloapis.com/v1alpha1\""
+        }
+      ]
+    },
+    "pods": {
+      "items": [],
+      "total_count": 0
+    },
+    "deployment": {
+      "unavailable": "NotFound"
+    }
+  },
+  "startup_seconds": 133.704,
+  "hub_crds_absent_after_cleanup": true,
+  "cleanup_seconds": 36.406,
+  "total_seconds": 173.585
+}

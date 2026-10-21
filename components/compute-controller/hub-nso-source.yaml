@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: compute-a1t-hub-nso-source
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 5m
+  url: https://github.com/datum-cloud/network-services-operator.git
+  ref:
+    commit: 79245f00d6220c128df3d024475ff7b1566ce305
+  sparseCheckout:
+    - config
