@@ -457,6 +457,20 @@ def docker_member_exec_args(container_id: str, *args: str) -> list[str]:
     return ["docker", "exec", container_id, *args]
 
 
+def verify_readonly_modules_mount(mountinfo: str, resolved_path: str) -> None:
+    """Check the node's effective mount, including /lib -> /usr/lib aliases."""
+    require(resolved_path.startswith("/") and ".." not in Path(resolved_path).parts and
+            len(resolved_path) <= 256 and len(mountinfo) <= 1_000_000,
+            "member module mount observation is invalid")
+    matches = []
+    for line in mountinfo.splitlines():
+        fields = line.split()
+        if len(fields) >= 6 and fields[4] == resolved_path:
+            matches.append(fields[5].split(","))
+    require(len(matches) == 1 and "ro" in matches[0] and "rw" not in matches[0],
+            "member node module tree is not mounted read-only at its resolved path")
+
+
 def create_yaml(kubeconfig: Path, context: str, manifest: str, env: dict[str, str],
                 *, stage: str) -> dict:
     created = run(kubectl_args(kubeconfig, context, "create", "-f", "-", "-o", "json"),
@@ -653,11 +667,12 @@ def setup_member(profile: str, host_cluster: str, host_evidence: Path,
                     "nodeKernelVersion": node_kernel, "phase": "member-created"})
     write_journal(private_dir, journal)
     _FAILURE_STAGE = "member-runtime-preflight"
-    node_kvm = run(docker_member_exec_args(actual_node_id, "sh", "-ec",
-                    "test -c /dev/kvm && test -d /lib/modules && grep -E ' /lib/modules .* ro[,)]' /proc/mounts"),
-                   env, timeout=30)
-    require(bool(node_kvm), "member node cannot verify KVM and read-only modules mounts")
-    run(docker_member_exec_args(actual_node_id, "sh", "-ec", "test -c /dev/kvm"), env, timeout=20)
+    resolved_modules = run(docker_member_exec_args(actual_node_id, "sh", "-ec",
+                            "test -c /dev/kvm && test -d /lib/modules && readlink -f /lib/modules"),
+                           env, timeout=30)
+    node_mountinfo = run(docker_member_exec_args(actual_node_id, "cat", "/proc/self/mountinfo"),
+                         env, timeout=30)
+    verify_readonly_modules_mount(node_mountinfo, resolved_modules)
 
     _FAILURE_STAGE = "flux-install"
     kustomize_apply(ROOT / "components/flux", member_kubeconfig, context, env)
