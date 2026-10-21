@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apps-a1t-native-registry
+  namespace: flux-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      apps-a1t.datum.net/component: native-registry
+  template:
+    metadata:
+      labels:
+        apps-a1t.datum.net/component: native-registry
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: registry
+          image: docker.io/library/registry@sha256:fa647fc1e5d5df7d8d923fb6332aab8e78783f8fca1a1394efb4011f68f5a793
+          ports:
+            - containerPort: 5000
+          env:
+            - name: REGISTRY_HTTP_ADDR
+              value: 0.0.0.0:5000
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: /var/lib/registry
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apps-a1t-native-registry
+  namespace: flux-system
+spec:
+  type: ClusterIP
+  selector:
+    apps-a1t.datum.net/component: native-registry
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000

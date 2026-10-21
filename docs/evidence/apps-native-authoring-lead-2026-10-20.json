@@ -1,0 +1,128 @@
+{
+  "run_id": "apps-native-cea79c5c8c25e035",
+  "source_revision": "bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+  "binary_revision": "b28933ec578cfa1ce785948b3063f45698bbd1bf",
+  "image_index": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12",
+  "arm64_manifest": "sha256:5a202d5ca1416edf006a8b4a779a1a8df6be11774d93b3c4ffc3e484f0c7a798",
+  "arm64_config": "sha256:5ea39c7a90472c9cd506ef5862c73c7fbf8ad3237edd1272a16442795dce2709",
+  "source_config_sha256": "741e49fb0e871688402ba546441918c8b52ee50e83eb28c4819af2fc90408893",
+  "source_config_file_count": 32,
+  "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
+  "project_uids": {
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30",
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0"
+  },
+  "checks": [
+    "read-only preflight: exact source, isolated APIs, Projects, CA, image and collisions",
+    "private OCI source exact digest pull matched clean Apps config tree",
+    "four fresh scoped Milo Users pass deny matrix; author writes remain withheld",
+    "remote Flux installed exact two source CRDs; established schemas and two real Project paths",
+    "host Flux manager Ready: two verified imageIDs and CA-validated webhook endpoints",
+    "root Milo Flux installed only source-owned fail-closed WCs with verified public CA",
+    "held Lease kept one admitted pending edit; validator denied a second spec edit",
+    "released Lease; native controller wrote one immutable revision then status",
+    "wrong public CA rejected a named webhook TLS request; exact CA restored",
+    "customer cannot write status/history or bypass Project routing at Milo root",
+    "two replacement native manager replicas retained full template and immutable history",
+    "deletion retained immutable history; same name with new UID made a separate chain",
+    "digest mismatch denied; four exact numeric strings/digest survived Milo API and history"
+  ],
+  "result": "pass",
+  "cleanup": "complete",
+  "private_oci_digest": "sha256:e442c79a6817526bae99ce21cf75d84d0697c95e85581e083f562dbabd73f3c0",
+  "observed_crd_schema_sha256": {
+    "apptemplates.apps.miloapis.com": "98a9c29e58875e38ecc2fdceab70c1afa9d7f0c5dcb8bf6678c334fd264b9481",
+    "apptemplaterevisions.apps.miloapis.com": "3c10d8508b1d4005683af3ccfd0c10c7636f44f95f99453edb27b04393716586"
+  },
+  "initial_pods": {
+    "deployment_uid": "93585551-6ae8-4177-9757-4445a2711890",
+    "pods": [
+      {
+        "uid": "156ce039-406a-4233-9974-9680e76476a0",
+        "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+      },
+      {
+        "uid": "2fadaa4a-8e0e-4a76-a2bd-005678880735",
+        "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+      }
+    ]
+  },
+  "discovery": {
+    "root_status": 200,
+    "root_resource_names": [
+      "apptemplaterevisions",
+      "apptemplates",
+      "apptemplates/status"
+    ]
+  },
+  "history": {
+    "template_uids": [
+      "1db28bd7-1da9-4b96-8f8c-9b6264c2b275",
+      "ed424442-5e70-4a4c-8b48-f9e01eff65e3",
+      "c2665e7c-f360-455e-bb6b-eabfc46cfc9b"
+    ],
+    "revision_names": [
+      "atr-34b24d42f946d554b2536d76c8266b7989a73cccf883531a",
+      "atr-bd4dfb6da120c069d77aa66811e97fe41160ea7eb9f55804",
+      "atr-feb5a36bc67a589b128fd5303c6cff612622fe97cf5a4b25",
+      "atr-b180b91223df37049ea7b0d58247252a2e68968491aaef7a"
+    ],
+    "precision_digest": "sha256:c0f3fc1db9b5ea79b660a4809a126055cd364980439e2746f8fdc155562274c7"
+  },
+  "pods_before_after": {
+    "before": {
+      "deployment_uid": "93585551-6ae8-4177-9757-4445a2711890",
+      "pods": [
+        {
+          "uid": "156ce039-406a-4233-9974-9680e76476a0",
+          "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+        },
+        {
+          "uid": "2fadaa4a-8e0e-4a76-a2bd-005678880735",
+          "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+        }
+      ]
+    },
+    "after": {
+      "deployment_uid": "93585551-6ae8-4177-9757-4445a2711890",
+      "pods": [
+        {
+          "uid": "99e81082-af3c-4a85-a676-07102ff26eaf",
+          "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+        },
+        {
+          "uid": "c8b7462b-73d6-42ba-be9e-bab15bf19b0c",
+          "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+        }
+      ]
+    }
+  },
+  "test_duration_seconds": 85.847,
+  "cleanup_actions": [
+    "read-only ownership and Project UID census before WC teardown",
+    "delete root WC Flux stage and verify absent",
+    "verify both root WCs absent",
+    "revoke dedicated author binding after WC removal",
+    "release held leader Lease",
+    "remove only owned Project authoring data",
+    "delete host controller Flux stage and verify absent",
+    "verify manager Deployment absent",
+    "delete root CRD Flux stage and verify absent",
+    "verify owned CRDs absent",
+    "delete namespace",
+    "delete installer-secret",
+    "delete rbac",
+    "delete source",
+    "restore dedicated static auth exactly",
+    "resume Milo core Flux by CAS",
+    "delete registry",
+    "stop private port-forward",
+    "stop private port-forward",
+    "close host API proxy",
+    "close Milo API proxy"
+  ],
+  "cleanup_errors": [],
+  "cleanup_duration_seconds": 32.965,
+  "total_duration_seconds": 118.812
+}

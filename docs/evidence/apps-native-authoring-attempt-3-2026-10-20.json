@@ -1,0 +1,361 @@
+{
+  "run_id": "apps-native-4d20cfc446face3f",
+  "source_revision": "bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+  "binary_revision": "b28933ec578cfa1ce785948b3063f45698bbd1bf",
+  "image_index": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12",
+  "arm64_manifest": "sha256:5a202d5ca1416edf006a8b4a779a1a8df6be11774d93b3c4ffc3e484f0c7a798",
+  "arm64_config": "sha256:5ea39c7a90472c9cd506ef5862c73c7fbf8ad3237edd1272a16442795dce2709",
+  "source_config_sha256": "741e49fb0e871688402ba546441918c8b52ee50e83eb28c4819af2fc90408893",
+  "source_config_file_count": 32,
+  "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
+  "project_uids": {
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30",
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0"
+  },
+  "checks": [
+    "read-only preflight: exact source, isolated APIs, Projects, CA, image and collisions",
+    "private OCI source exact digest pull matched clean Apps config tree",
+    "four fresh scoped Milo Users pass deny matrix; author writes remain withheld",
+    "remote Flux installed exact two source CRDs; established schemas and two real Project paths",
+    "host Flux manager Ready: two verified imageIDs and CA-validated webhook endpoints",
+    "root Milo Flux installed only source-owned fail-closed WCs with verified public CA"
+  ],
+  "result": "fail",
+  "cleanup": "incomplete",
+  "private_oci_digest": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+  "observed_crd_schema_sha256": {
+    "apptemplates.apps.miloapis.com": "98a9c29e58875e38ecc2fdceab70c1afa9d7f0c5dcb8bf6678c334fd264b9481",
+    "apptemplaterevisions.apps.miloapis.com": "3c10d8508b1d4005683af3ccfd0c10c7636f44f95f99453edb27b04393716586"
+  },
+  "initial_pods": {
+    "deployment_uid": "0c061d97-1f0c-4330-91ea-70797a5ffaf9",
+    "pods": [
+      {
+        "uid": "3873bd5f-dcba-44de-9188-9a62c0ebb689",
+        "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+      },
+      {
+        "uid": "52a7e2ae-b7d5-4437-aa56-3d156fa7fba7",
+        "image_id": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
+      }
+    ]
+  },
+  "discovery": {
+    "root_status": 200,
+    "root_resource_names": [
+      "apptemplaterevisions",
+      "apptemplates",
+      "apptemplates/status"
+    ]
+  },
+  "failure_diagnostics": {
+    "milo-system/kustomization/apps-native-a1t-crds": {
+      "uid": "a8def839-7a86-4f89-9dd1-f8869afdb788",
+      "generation": 1,
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-21T04:32:57Z",
+            "message": "Applied revision: sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+            "observedGeneration": 1,
+            "reason": "ReconciliationSucceeded",
+            "status": "True",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-21T04:32:57Z",
+            "message": "Health check passed in 17.484128ms",
+            "observedGeneration": 1,
+            "reason": "Succeeded",
+            "status": "True",
+            "type": "Healthy"
+          }
+        ],
+        "history": [
+          {
+            "digest": "sha256:d6ca6f7dbbfc5edb65fe77ad4a6b51501d1c31efe6b901504c29adc70a4745fd",
+            "firstReconciled": "2026-10-21T04:32:57Z",
+            "lastReconciled": "2026-10-21T04:32:57Z",
+            "lastReconciledDuration": "97.242874ms",
+            "lastReconciledStatus": "ReconciliationSucceeded",
+            "metadata": {
+              "originRevision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+              "revision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429"
+            },
+            "totalReconciliations": 2
+          }
+        ],
+        "inventory": {
+          "entries": [
+            {
+              "id": "_apptemplaterevisions.apps.miloapis.com_apiextensions.k8s.io_CustomResourceDefinition",
+              "v": "v1"
+            },
+            {
+              "id": "_apptemplates.apps.miloapis.com_apiextensions.k8s.io_CustomResourceDefinition",
+              "v": "v1"
+            }
+          ]
+        },
+        "lastAppliedOriginRevision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+        "lastAppliedRevision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+        "lastAttemptedRevision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+        "lastHandledReconcileAt": "2026-10-20T23:32:52.788497-05:00",
+        "observedGeneration": 1
+      }
+    },
+    "flux-system/kustomization/apps-native-a1t-host": {
+      "uid": "03c7187a-6cac-427d-867d-5b81625dab31",
+      "generation": 1,
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-21T04:33:15Z",
+            "message": "Applied revision: sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+            "observedGeneration": 1,
+            "reason": "ReconciliationSucceeded",
+            "status": "True",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-21T04:33:15Z",
+            "message": "Health check passed in 38.029639ms",
+            "observedGeneration": 1,
+            "reason": "Succeeded",
+            "status": "True",
+            "type": "Healthy"
+          }
+        ],
+        "history": [
+          {
+            "digest": "sha256:efd707d4f32edab96d4a9636f6005fa83b7b09abf27a1321e43f79b04008862d",
+            "firstReconciled": "2026-10-21T04:33:15Z",
+            "lastReconciled": "2026-10-21T04:33:15Z",
+            "lastReconciledDuration": "211.202582ms",
+            "lastReconciledStatus": "ReconciliationSucceeded",
+            "metadata": {
+              "originRevision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+              "revision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429"
+            },
+            "totalReconciliations": 2
+          }
+        ],
+        "inventory": {
+          "entries": [
+            {
+              "id": "apps-system_apps-controller__ServiceAccount",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-controller-leader-election_rbac.authorization.k8s.io_Role",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-controller-leader-election_rbac.authorization.k8s.io_RoleBinding",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-controller__Service",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-controller_apps_Deployment",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-controller_policy_PodDisruptionBudget",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-serving-ca_cert-manager.io_Certificate",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-serving-tls_cert-manager.io_Certificate",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-serving-ca_cert-manager.io_Issuer",
+              "v": "v1"
+            },
+            {
+              "id": "apps-system_apps-test-selfsigned_cert-manager.io_Issuer",
+              "v": "v1"
+            }
+          ]
+        },
+        "lastAppliedOriginRevision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+        "lastAppliedRevision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+        "lastAttemptedRevision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+        "lastHandledReconcileAt": "2026-10-20T23:33:01.54541-05:00",
+        "observedGeneration": 1
+      }
+    },
+    "milo-system/kustomization/apps-native-a1t-admission": {
+      "uid": "1d37e6cb-3a3e-474f-bf1d-547f0e0bec00",
+      "generation": 1,
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-21T04:33:20Z",
+            "message": "Applied revision: sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+            "observedGeneration": 1,
+            "reason": "ReconciliationSucceeded",
+            "status": "True",
+            "type": "Ready"
+          }
+        ],
+        "history": [
+          {
+            "digest": "sha256:00c3785996d305c52f5326a53e6bc7a874e75754941e98bb78aa1a09d2d5a942",
+            "firstReconciled": "2026-10-21T04:33:18Z",
+            "lastReconciled": "2026-10-21T04:33:20Z",
+            "lastReconciledDuration": "81.724793ms",
+            "lastReconciledStatus": "ReconciliationSucceeded",
+            "metadata": {
+              "originRevision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+              "revision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429"
+            },
+            "totalReconciliations": 2
+          }
+        ],
+        "inventory": {
+          "entries": [
+            {
+              "id": "_apps-templates.apps.miloapis.com_admissionregistration.k8s.io_MutatingWebhookConfiguration",
+              "v": "v1"
+            },
+            {
+              "id": "_apps-authoring.apps.miloapis.com_admissionregistration.k8s.io_ValidatingWebhookConfiguration",
+              "v": "v1"
+            }
+          ]
+        },
+        "lastAppliedOriginRevision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+        "lastAppliedRevision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+        "lastAttemptedRevision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+        "lastHandledReconcileAt": "2026-10-20T23:33:20.148574-05:00",
+        "observedGeneration": 1
+      }
+    },
+    "flux-system/ocirepository/apps-native-a1t": {
+      "uid": "7fa82f80-019a-45d7-b53a-6182ef80c0a7",
+      "generation": 1,
+      "status": {
+        "artifact": {
+          "digest": "sha256:69cc95c397b95adea78bb24d7f938dce279f96bc30bc592c375d91dd0173d3a8",
+          "lastUpdateTime": "2026-10-21T04:32:48Z",
+          "metadata": {
+            "org.opencontainers.image.created": "2026-10-21T04:32:33Z",
+            "org.opencontainers.image.revision": "git@bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+            "org.opencontainers.image.source": "https://github.com/datum-labs/apps.git"
+          },
+          "path": "ocirepository/flux-system/apps-native-a1t/sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429.tar.gz",
+          "revision": "sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429",
+          "size": 59924,
+          "url": "http://source-controller.flux-system.svc.cluster.local./ocirepository/flux-system/apps-native-a1t/sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429.tar.gz"
+        },
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-21T04:32:48Z",
+            "message": "stored artifact for digest 'sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429'",
+            "observedGeneration": 1,
+            "reason": "Succeeded",
+            "status": "True",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-21T04:32:48Z",
+            "message": "stored artifact for digest 'sha256:39a6c131335d97874f4e993ba952492e6db9eff5795238980169a288f8081429'",
+            "observedGeneration": 1,
+            "reason": "Succeeded",
+            "status": "True",
+            "type": "ArtifactInStorage"
+          }
+        ],
+        "lastHandledReconcileAt": "2026-10-20T23:33:18.128749-05:00",
+        "observedGeneration": 1,
+        "url": "http://source-controller.flux-system.svc.cluster.local./ocirepository/flux-system/apps-native-a1t/latest.tar.gz"
+      }
+    },
+    "apps-system/deployment/apps-controller": {
+      "uid": "0c061d97-1f0c-4330-91ea-70797a5ffaf9",
+      "generation": 1,
+      "status": {
+        "availableReplicas": 2,
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-21T04:33:13Z",
+            "lastUpdateTime": "2026-10-21T04:33:13Z",
+            "message": "Deployment has minimum availability.",
+            "reason": "MinimumReplicasAvailable",
+            "status": "True",
+            "type": "Available"
+          },
+          {
+            "lastTransitionTime": "2026-10-21T04:33:00Z",
+            "lastUpdateTime": "2026-10-21T04:33:13Z",
+            "message": "ReplicaSet \"apps-controller-d8d4cb4cf\" has successfully progressed.",
+            "reason": "NewReplicaSetAvailable",
+            "status": "True",
+            "type": "Progressing"
+          }
+        ],
+        "observedGeneration": 1,
+        "readyReplicas": 2,
+        "replicas": 2,
+        "updatedReplicas": 2
+      }
+    },
+    "apps-system/certificate/apps-serving-tls": {
+      "uid": "e96adddb-e88b-4fda-8ee4-21e264d3ac65",
+      "generation": 1,
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-21T04:33:05Z",
+            "message": "Certificate is up to date and has not expired",
+            "observedGeneration": 1,
+            "reason": "Ready",
+            "status": "True",
+            "type": "Ready"
+          }
+        ],
+        "notAfter": "2027-01-19T04:33:05Z",
+        "notBefore": "2026-10-21T04:33:05Z",
+        "renewalTime": "2026-12-20T04:33:05Z",
+        "revision": 1
+      }
+    }
+  },
+  "test_duration_seconds": 54.984,
+  "cleanup_actions": [
+    "read-only ownership and Project UID census before WC teardown",
+    "delete root WC Flux stage and verify absent",
+    "verify both root WCs absent",
+    "revoke dedicated author binding after WC removal",
+    "remove only owned Project authoring data",
+    "delete host controller Flux stage and verify absent",
+    "verify manager Deployment absent",
+    "delete root CRD Flux stage and verify absent",
+    "verify owned CRDs absent",
+    "delete namespace",
+    "delete installer-secret",
+    "delete rbac",
+    "delete source",
+    "restore dedicated static auth exactly",
+    "resume Milo core Flux by CAS",
+    "delete registry",
+    "stop private port-forward",
+    "stop private port-forward",
+    "close host API proxy",
+    "close Milo API proxy"
+  ],
+  "cleanup_errors": [
+    "release held leader Lease: timed out waiting for lease/apps-authoring.apps.miloapis.com absent after owned delete: refusing replacement lease/apps-authoring.apps.miloapis.com after delete"
+  ],
+  "cleanup_duration_seconds": 145.998,
+  "total_duration_seconds": 200.982,
+  "failure": "admission did not reject second fresh-RV spec edit while history pending"
+}
