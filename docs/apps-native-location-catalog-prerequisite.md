@@ -57,10 +57,14 @@ and `--evidence-file` set to a different private path.
 Add `--execute` only after reviewing both preflights. Both stages retain their
 owned resources for the next dependency. Teardown runs `--cleanup` for
 Locations first. Then remove the task-owned Projects through their own
-UID-safe bootstrap helper. Catalog `--cleanup` refuses a completed stage while
-Projects or either operator namespace remains, preventing silent deletion of
-project-scoped data. A failed prune keeps its source objects and journal for
-recovery. Do not switch global Docker or kubectl contexts.
+UID-safe bootstrap helper, passing `--installer-evidence-file` and
+`--retain-root-kubeconfig` as described in the [ordered cleanup contract](apps-native-catalog-crds.md#ordered-cleanup-while-the-installer-holds-milo-core).
+Catalog `--cleanup` refuses while Projects or dependent workloads remain. It
+accepts the retained `locations-system` namespace only when its exact UID/run
+label matches the completed Locations journal and a successful workload census
+is empty; `services-system` must be absent. It never deletes either namespace.
+A failed prune keeps its source objects and journal for recovery. Do not switch
+global Docker or kubectl contexts.
 
 Current evidence: the fresh VZ Kind baseline and three real Project APIs were
 Ready; the Catalog API graph's read-only preflight found no collisions. No

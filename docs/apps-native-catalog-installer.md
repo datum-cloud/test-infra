@@ -36,3 +36,9 @@ installer and four scope failure tests to the signed baseline suite. Those are
 offline API doubles, not proof of real Milo permission, revocation or teardown.
 Do not deploy until independent review. The later schema/operator slices must
 use this verified scoped installer and preserve its cleanup ordering.
+
+Project teardown while this installer is active must use the explicit evidence
+path described in [ordered cleanup](apps-native-catalog-crds.md#ordered-cleanup-while-the-installer-holds-milo-core).
+Setup records the source UID/generation/full spec and applied core revision
+before suspension. An older journal missing this proof cannot authorize that
+cleanup exception and is retained for separate recovery review.

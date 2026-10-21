@@ -437,6 +437,7 @@ def run(args: argparse.Namespace) -> None:
     auth = host.json("-n", "milo-system", "get", "secret", "milo-apiserver-auth-tokens")
     old_csv = auth_csv(auth["data"]["tokens.csv"])
     core = host.json("-n", "flux-system", "get", "kustomization", "milo-core")
+    source = host.json("-n", "flux-system", "get", "gitrepository", "milo")
     token = secrets.token_urlsafe(32)
     new_csv = old_csv.rstrip("\n") + f'\n{token},{USER},{USER},"system:authenticated"\n'
     ca = milo.json("config", "view", "--raw")["clusters"][0]["cluster"][
@@ -447,6 +448,10 @@ def run(args: argparse.Namespace) -> None:
              "core_uid": core["metadata"]["uid"],
              "core_generation": core["metadata"]["generation"],
              "core_spec": core["spec"],
+             "core_applied_revision": core.get("status", {}).get("lastAppliedRevision"),
+             "source_uid": source["metadata"]["uid"],
+             "source_generation": source["metadata"]["generation"],
+             "source_spec": source["spec"],
              "core_suspend_present": "suspend" in core["spec"],
              "core_suspend_intent": False, "auth_intent": False}
     evidence = {"host_context": args.host_context, "milo_source": MILO_SHA,
