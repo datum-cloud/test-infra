@@ -154,6 +154,8 @@ jobs:
             -s test-infra/hack -p 'test_apps_native_guard_quota.py' -q
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
             -s test-infra/hack -p 'test_apps_native_flux_prune.py' -q
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_apps_native_pending.py' -q
           python3 test-infra/hack/test-apps-native-authoring.py \
             --apps-source "$GITHUB_WORKSPACE/apps-source" \
             --apps-revision "$APPS_SOURCE_SHA" \

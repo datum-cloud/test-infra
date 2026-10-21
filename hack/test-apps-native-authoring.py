@@ -13,6 +13,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import http.client
+import io
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,7 @@ import sys
 import tempfile
 import time
 from urllib.parse import quote
+from types import SimpleNamespace
 
 import yaml
 
@@ -37,6 +39,9 @@ from apps_native_support import (APIProxy, Commands, Forward, Kube, Owned, HeldL
                                  private_write, ready, require,
                                  tree_fingerprint, verify_cert, wait_for,
                                  certificate_ready)
+from apps_native_profiles import AUTHORING, PENDING, selected
+import apps_native_pending as pending_trial
+
 from apps_native_cli.driver import (AppsCLI, CLI_SHA, build_private_cli,
                                     delete_with_cli, exercise_history_diff_restore)
 
@@ -71,6 +76,7 @@ FLUX_ADMISSION = "apps-native-a1t-admission"
 INSTALLER_SECRET = "apps-native-a1t-milo-installer"
 REGISTRY_NAME = "apps-a1t-native-registry"
 SOURCE_REPO = "oci://apps-a1t-native-registry.flux-system.svc.cluster.local:5000/apps-native"
+AUTHORING_PROJECT_ANNOTATION = "apps.miloapis.com/authoring-project-uid"
 TEMPLATE_NAME = "apps-a1t-native-authoring-proof"
 PRECISION_NAME = TEMPLATE_NAME + "-precision"
 # Exact snapshot canonical encoding for the four values that exposed JSON
@@ -165,7 +171,13 @@ def harness_revision(commands: Commands) -> str:
     return revision
 
 
-def source_contract(commands: Commands, source: Path, revision: str) -> dict:
+def authoring_annotation_contract(source: Path) -> None:
+    text = (source / "internal/templatecontroller/controller.go").read_text()
+    require(re.search(r'ProjectAnnotation\s*=\s*"' + re.escape(AUTHORING_PROJECT_ANNOTATION) + r'"', text) is not None,
+            "source-owned authoring Project provenance key differs from fixture assertion")
+
+
+def source_contract(commands: Commands, source: Path, revision: str, profile=AUTHORING) -> dict:
     require(source.is_absolute() and source.is_dir(), "absolute Apps source checkout required")
     require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None,
             "exact 40-character Apps config revision required")
@@ -174,16 +186,17 @@ def source_contract(commands: Commands, source: Path, revision: str) -> dict:
     require(commands.run("git", "-C", str(source), "status", "--porcelain",
                          "--untracked-files=all") == "", "Apps source checkout is dirty")
     require(commands.run("git", "-C", str(source), "merge-base", "--is-ancestor",
-                         APPS_BINARY_SHA, revision) == "",
+                         profile.binary, revision) == "",
             "published Apps binary source is not an ancestor of config revision")
     runtime_changes = commands.run(
-        "git", "-C", str(source), "diff", "--name-only", "-z", APPS_BINARY_SHA, revision,
+        "git", "-C", str(source), "diff", "--name-only", "-z", profile.binary, revision,
         "--", "Dockerfile", ".dockerignore", "go.mod", "go.sum",
         "cmd/apps-controller", "internal", "pkg")
     changed_paths = [path for path in runtime_changes.split("\0") if path]
     runtime_violations = runtime_source_violations(source, changed_paths)
     require(not runtime_violations,
             "Apps runtime differs from published image source; publish and pin the new runtime")
+    authoring_annotation_contract(source)
     config_hash, config_count = tree_fingerprint(source / "config")
     crds = render(commands, source / "config/crd")
     require({key(item) for item in crds} ==
@@ -208,7 +221,7 @@ def source_contract(commands: Commands, source: Path, revision: str) -> dict:
                     spec_schema["properties"]["definitionJSON"]["type"] == "string" and
                     "definition" not in spec_schema["properties"],
                     "Apps revision CRD still exposes lossy structured definition")
-    host = render(commands, source / "config/overlays/test-infra/host")
+    host = render(commands, source / profile.host_root)
     host_keys = {key(item) for item in host}
     expected_host = {("ServiceAccount", "apps-system", "apps-controller"),
                      ("Role", "apps-system", "apps-controller-leader-election"),
@@ -281,10 +294,10 @@ def source_contract(commands: Commands, source: Path, revision: str) -> dict:
             rule["apiVersions"] == ["v1alpha1"] and
             rule["scope"] == "Cluster" for rule in hook["rules"]),
             f"Apps source hook rules changed: {path}")
-    require(containers[0]["image"] == APPS_IMAGE,
+    require(containers[0]["image"] == profile.image,
             "Apps host overlay no longer pins the published exact OCI index")
     require(deployment["spec"]["template"]["metadata"]["annotations"].get(
-        "org.opencontainers.image.revision") == APPS_BINARY_SHA and
+        "org.opencontainers.image.revision") == profile.binary and
         deployment["spec"]["template"]["metadata"]["annotations"].get(
         "org.opencontainers.image.source") == "https://github.com/datum-labs/apps",
         "Apps Deployment source provenance changed")
@@ -311,7 +324,10 @@ def source_contract(commands: Commands, source: Path, revision: str) -> dict:
              "--webhook-cert-dir=/var/run/apps/webhook"} <= args and
             "--kubeconfig" not in " ".join(args),
             "Apps manager root/project credentials or local in-cluster API changed")
-    return {"config_hash": config_hash, "config_count": config_count,
+    require(("--internal-pending-apps=true" in args) == profile.pending and
+            not any(value.startswith("--internal-pending-apps") and value != "--internal-pending-apps=true" for value in args),
+            "Apps runtime opt-in differs from selected profile")
+    return {"profile": profile, "config_hash": config_hash, "config_count": config_count,
             "crds": crds, "host": host, "admission": admission,
             "host_keys": host_keys}
 
@@ -388,11 +404,11 @@ def fixture_contract(fixtures: dict[str, list[dict]]) -> None:
                 "native User binding changed")
 
 
-def image_contract(path: Path) -> dict:
+def image_contract(path: Path, profile=AUTHORING) -> dict:
     require(path.is_absolute() and path.is_file(),
             "absolute published OCI image evidence JSON is required")
     image = json.loads(path.read_text())
-    require(image.get("image") == APPS_IMAGE,
+    require(image.get("image") == profile.image,
             "published OCI index differs from exact runtime pin")
     platforms = {(entry["platform"]["os"], entry["platform"]["architecture"]): entry
                  for entry in image.get("platforms", [])}
@@ -400,12 +416,12 @@ def image_contract(path: Path) -> dict:
             set(platforms) == {("linux", "amd64"), ("linux", "arm64")},
             "published Apps OCI index lacks exact Linux multiarch platform set")
     for entry in platforms.values():
-        require(entry.get("revision") == APPS_BINARY_SHA and
+        require(entry.get("revision") == profile.binary and
                 entry.get("source") == "https://github.com/datum-labs/apps" and
                 entry.get("user") == "65532:65532" and
                 entry.get("entrypoint") == ["/apps-controller"],
                 "published Apps platform config labels/identity differ from source")
-    for architecture, (manifest, config) in PLATFORM_DIGESTS.items():
+    for architecture, (manifest, config) in profile.platforms.items():
         observed = platforms[("linux", architecture)]
         require(observed.get("manifest") == manifest and observed.get("config") == config,
                 f"published {architecture} manifest/config differs from runtime image proof")
@@ -447,14 +463,14 @@ def secret_bytes(kube: Kube, namespace: str, name: str, key_name: str) -> bytes:
     return base64.b64decode(secret["data"][key_name], validate=True)
 
 
-def node_images(node_items: list[dict], architecture: str) -> set[str]:
-    require(architecture in PLATFORM_DIGESTS and len(node_items) == 1 and
+def node_images(node_items: list[dict], architecture: str, profile=AUTHORING) -> set[str]:
+    require(architecture in profile.platforms and len(node_items) == 1 and
             node_items[0]["status"]["nodeInfo"]["architecture"] == architecture and
             node_items[0]["status"]["nodeInfo"]["operatingSystem"] == "linux",
             f"exact Apps runtime requires one Linux/{architecture} Kind node")
     images = {name for image in node_items[0]["status"].get("images", [])
               for name in image.get("names", [])}
-    require(APPS_IMAGE in images, "exact Apps OCI index not loaded on isolated Kind node")
+    require(profile.image in images, "exact Apps OCI index not loaded on isolated Kind node")
     return images
 
 
@@ -472,7 +488,7 @@ def preflight(args, commands: Commands, contract: dict, fixtures: dict,
     assert_local_config(host, None)
     assert_local_config(milo, f"https://127.0.0.1:{args.milo_port}")
     node_items = host.json("get", "nodes")["items"]
-    images = node_images(node_items, args.expected_architecture)
+    images = node_images(node_items, args.expected_architecture, contract.get("profile", AUTHORING))
     core = host.json("get", "kustomization", "milo-core", "-n", "flux-system")
     milo_source = host.json("get", "gitrepository", "milo", "-n", "flux-system")
     require(ready(core) and not core["spec"].get("suspend", False),
@@ -603,12 +619,17 @@ def restart_milo(host: Kube) -> None:
            "--timeout=180s", timeout=190)
 
 
-def token_csv(old_b64: str, tokens: dict[str, str]) -> str:
+def token_csv(old_b64: str, tokens: dict[str, str], *, pending: bool = False) -> str:
     original = base64.b64decode(old_b64, validate=True).decode()
     suffix = "" if original.endswith("\n") else "\n"
-    extra = "".join(f"{token},{user},{user},system:authenticated\n"
-                    for user, token in tokens.items())
-    return base64.b64encode((original + suffix + extra).encode()).decode()
+    extra = io.StringIO()
+    writer = csv.writer(extra, lineterminator="\n")
+    for user, token in tokens.items():
+        groups = "system:authenticated"
+        if pending and user == pending_trial.REQUESTER:
+            groups += "," + pending_trial.GROUP
+        writer.writerow((token, user, user, groups))
+    return base64.b64encode((original + suffix + extra.getvalue()).encode()).decode()
 
 
 def owned(kube: Kube, namespace: str | None, manifest: dict,
@@ -667,14 +688,15 @@ def exact_flux(kube: Kube, name: str, namespace: str, digest: str) -> dict:
 
 
 def milo_request(port: int, ca_file: Path, token: str, method: str,
-                 path: str, body: dict | None = None) -> tuple[int, dict | str]:
+                 path: str, body: dict | None = None, *,
+                 content_type: str = "application/json") -> tuple[int, dict | str]:
     ctx = ssl.create_default_context(cafile=str(ca_file))
     connection = http.client.HTTPSConnection("127.0.0.1", port, context=ctx, timeout=10)
     try:
         payload = json.dumps(body).encode() if body is not None else None
         connection.request(method, path, body=payload,
                            headers={"Authorization": "Bearer " + token,
-                                    "Content-Type": "application/json"})
+                                    "Content-Type": content_type})
         response = connection.getresponse()
         raw = response.read(65537)
         require(len(raw) <= 65536, "Milo public API response exceeded bounded diagnostic size")
@@ -831,9 +853,9 @@ def wait_template(port: int, ca: Path, token: str, project: str,
     return wait_for(acknowledged, f"real {project} template history sequence {sequence}", seconds)
 
 
-def pod_snapshot(host: Kube, architecture: str) -> dict:
-    require(architecture in PLATFORM_DIGESTS, "unsupported exact Apps platform")
-    manifest, config = PLATFORM_DIGESTS[architecture]
+def pod_snapshot(host: Kube, architecture: str, profile=AUTHORING) -> dict:
+    require(architecture in profile.platforms, "unsupported exact Apps platform")
+    manifest, config = profile.platforms[architecture]
     deployment = host.json("get", "deployment", "apps-controller", "-n", "apps-system")
     pods = host.json("get", "pods", "-n", "apps-system", "-l",
                      "app.kubernetes.io/name=apps-controller")["items"]
@@ -852,7 +874,7 @@ def pod_snapshot(host: Kube, architecture: str) -> dict:
         statuses.append({"uid": pod["metadata"]["uid"],
                          "image_id": observed[0]["imageID"]})
     require({pod["image_id"] for pod in statuses} <= {
-        "docker-pullable://" + APPS_IMAGE, APPS_IMAGE,
+        "docker-pullable://" + profile.image, profile.image,
         "docker-pullable://ghcr.io/datum-labs/apps@" + manifest,
         "ghcr.io/datum-labs/apps@" + manifest,
         "docker://" + config},
@@ -947,7 +969,7 @@ def test_authoring(args, state: dict, tokens: dict, ca_file: Path,
             created["metadata"].get("annotations", {}).get(
                 "apps.miloapis.com/change-actor-uid") == AUTHOR and
             created["metadata"]["annotations"].get(
-                "apps.miloapis.com/authoring-project-uid") == state["projects"][project] and
+                AUTHORING_PROJECT_ANNOTATION) == state["projects"][project] and
             created["metadata"]["annotations"].get(
                 "apps.miloapis.com/change-generation") == "1" and
             "apps.miloapis.com/template-history" in created["metadata"].get("finalizers", []),
@@ -1089,14 +1111,14 @@ def post_admission(args, state: dict, tokens: dict, ca_file: Path,
             accepted["status"]["latestRevision"] in {
                 item["metadata"]["name"] for item in revisions},
             "second real spec edit did not append exactly one immutable revision")
-    before_pods = pod_snapshot(host, args.expected_architecture)
+    before_pods = pod_snapshot(host, args.expected_architecture, selected(getattr(args, "internal_pending_apps", False)))
     before_template = must_http(port, ca_file, author, "GET",
                                 project_path(project, "apptemplates", name), 200)
     host.k("rollout", "restart", "deployment/apps-controller", "-n", "apps-system")
     host.k("rollout", "status", "deployment/apps-controller", "-n", "apps-system",
            "--timeout=180s", timeout=190)
     def replaced_pods():
-        observed = pod_snapshot(host, args.expected_architecture)
+        observed = pod_snapshot(host, args.expected_architecture, selected(getattr(args, "internal_pending_apps", False)))
         old_uids = {item["uid"] for item in before_pods["pods"]}
         new_uids = {item["uid"] for item in observed["pods"]}
         return observed if old_uids.isdisjoint(new_uids) else False
@@ -1340,6 +1362,16 @@ def cleanup(args, commands: Commands, state: dict, refs: dict[str, list[Owned]],
             return False
 
     try:
+        if state.get("pending_api_intent") and not attempt(
+                "verify discovery role restored before any capability teardown",
+                lambda: pending_trial.verify_discovery_restore(state)):
+            errors.append("retaining capability chain after interrupted discovery authorization probe")
+            return errors
+        if state.get("pending_api_intent") and not attempt(
+                "revoke pending test rights and drain exact pending requests with hooks active",
+                lambda: pending_trial.drain(SimpleNamespace(**globals()), state, refs, host_proxy, milo_proxy)):
+            errors.append("retaining pending and authoring hooks, manager, CA and credentials after ambiguous/incomplete pending drain")
+            return errors
         # Refuse to disable fail-closed admission while any project contains
         # data that is not unquestionably this run's. Preserve the serving
         # manager/CA/credentials for manual recovery on ambiguous inventory.
@@ -1373,6 +1405,11 @@ def cleanup(args, commands: Commands, state: dict, refs: dict[str, list[Owned]],
                                              state["allowed_template_uids"])):
                 errors.append("retaining CRDs and scoped installer after foreign/ambiguous data")
                 return errors
+        if state.get("pending_api_intent") and not attempt(
+                "verify pending empty and prune its sole CRD/WC owner while manager remains active",
+                lambda: pending_trial.prune_api(SimpleNamespace(**globals()), state, refs, host_proxy, milo_proxy)):
+            errors.append("retaining manager, CA and credentials while pending API stage remains")
+            return errors
         if not attempt("delete host controller Flux stage and verify absent", lambda:
                        stage_prune_gate(refs, "host", host, host_proxy,
                                         state["run_id"], FLUX_HOST, "flux-system")):
@@ -1469,10 +1506,10 @@ def execute(args, commands: Commands, state: dict, source: dict,
     evidence_file.chmod(0o600)
     evidence = {"run_id": run_id, "source_revision": args.apps_revision,
                 "test_infra_revision": args.test_infra_revision,
-                "binary_revision": APPS_BINARY_SHA, "image_index": APPS_IMAGE,
+                "binary_revision": source["profile"].binary, "image_index": source["profile"].image,
                 "node_architecture": args.expected_architecture,
-                "platform_manifest": PLATFORM_DIGESTS[args.expected_architecture][0],
-                "platform_config": PLATFORM_DIGESTS[args.expected_architecture][1],
+                "platform_manifest": source["profile"].platforms[args.expected_architecture][0],
+                "platform_config": source["profile"].platforms[args.expected_architecture][1],
                 "source_config_sha256": source["config_hash"],
                 "source_config_file_count": source["config_count"],
                 "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
@@ -1490,12 +1527,15 @@ def execute(args, commands: Commands, state: dict, source: dict,
     state.update({"run_id": run_id, "private": private, "allowed_template_uids": {},
                   "auth_intent": False, "suspend_intent": False,
                   "crds_installed": False})
+    state["pending_intents"] = []
+    state["pending_evidence"], state["pending_evidence_file"] = evidence, evidence_file
+    pending = source["profile"].pending
     refs: dict[str, list[Owned]] = {}
     host_proxy = APIProxy(host, private, "host")
     milo_proxy = APIProxy(milo, private, "milo")
     forwards: list[Forward] = []
-    tokens = {user: secrets.token_urlsafe(48) for user in USERS}
-    state["new_auth_b64"] = token_csv(state["old_auth_b64"], tokens)
+    tokens = {user: secrets.token_urlsafe(48) for user in USERS + ((pending_trial.REQUESTER,) if pending else ())}
+    state["new_auth_b64"] = token_csv(state["old_auth_b64"], tokens, pending=pending)
     primary_error: Exception | None = None
     commands.deadline = started + args.deadline_seconds
     record("read-only preflight: exact source, isolated APIs, Projects, CA, image and collisions")
@@ -1528,6 +1568,8 @@ def execute(args, commands: Commands, state: dict, source: dict,
             plural = "clusterroles" if item["kind"] == "ClusterRole" else "clusterrolebindings"
             register_owned(refs, "rbac", milo, item, None, run_id,
                            plural, "/apis/rbac.authorization.k8s.io/v1")
+        if pending:
+            pending_trial.install_rbac(SimpleNamespace(**globals()), fixtures, state, refs)
         state["auth_intent"] = True
         patch_auth(host, private, state, state["old_auth_b64"], state["new_auth_b64"])
         restart_milo(host)
@@ -1539,7 +1581,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
         direct.verified_tls(ca_file)
         forwards.append(direct)
         scoped_configs: dict[str, Path] = {}
-        for user in USERS:
+        for user in tokens:
             file = private / f"{user}.kubeconfig"
             private_write(file, kubeconfig_text(
                 f"https://127.0.0.1:{args.direct_milo_port}", state["milo_ca"],
@@ -1597,6 +1639,14 @@ def execute(args, commands: Commands, state: dict, source: dict,
             wait_for(lambda p=path: milo_proxy.get(p),
                      f"administrator observes native Apps discovery in {project}", 120)
         record("remote Flux installed exact two source CRDs; established schemas and two real Project paths")
+        if pending:
+            evidence["pending_crd_schema"] = pending_trial.install_api(
+                SimpleNamespace(**globals()), fixtures, source, state, refs, digest)
+            require(not pending_trial.census(SimpleNamespace(**globals()), milo_proxy, state),
+                    "pending data predates trial")
+            Kube(commands, scoped_configs[pending_trial.REQUESTER], "scoped").can_i(
+                "create", "apps.apps.miloapis.com", False)
+            record("pending API source installed early with failing empty-CA hooks; requester CREATE rights withheld")
         held_lease = {"apiVersion": "coordination.k8s.io/v1", "kind": "Lease",
                       "metadata": {"name": "apps-authoring.apps.miloapis.com",
                                    "namespace": "apps-system"},
@@ -1614,7 +1664,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
                             source["host"], digest, evidence_file)
         flux_reconcile(host, "kustomization", FLUX_HOST, "flux-system", 600)
         exact_flux(host, FLUX_HOST, "flux-system", digest)
-        before = pod_snapshot(host, args.expected_architecture)
+        before = pod_snapshot(host, args.expected_architecture, selected(getattr(args, "internal_pending_apps", False)))
         evidence["initial_pods"] = before
         for name in ("apps-serving-ca", "apps-serving-tls"):
             certificate = host.json("get", "certificate", name, "-n", "apps-system")
@@ -1647,6 +1697,9 @@ def execute(args, commands: Commands, state: dict, source: dict,
         flux_reconcile(host, "kustomization", FLUX_ADMISSION, "milo-system", 300)
         exact_flux(host, FLUX_ADMISSION, "milo-system", digest)
         assert_admission(milo, source, app_ca)
+        if pending:
+            pending_trial.enable_hooks(SimpleNamespace(**globals()), source, state, refs, app_ca, digest)
+            record("pending source hooks match exact rules and verified public CA before requester grants")
         require(deferred_author_binding is not None,
                 "source fixture lacks deferred author User binding")
         register_owned(refs, "author-binding", milo, deferred_author_binding, None, run_id,
@@ -1699,6 +1752,9 @@ def execute(args, commands: Commands, state: dict, source: dict,
                                "precision_digest": precision["digest"]}
         evidence["pods_before_after"] = {"before": history["before_pods"],
                                          "after": history["after_pods"]}
+        if pending:
+            pending_trial.exercise(SimpleNamespace(**globals()), args, state, refs, fixtures,
+                                   tokens, ca_file, record, evidence, evidence_file, host_proxy)
     except Exception as exc:
         primary_error = exc
         evidence["failure"] = str(exc)[:900]
@@ -1723,6 +1779,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--internal-pending-apps", action="store_true", help="reviewed pending-only profile; never enables installation")
     parser.add_argument("--apps-source", type=Path, required=True,
                         help="absolute clean Apps checkout at --apps-revision")
     parser.add_argument("--datumctl-source", type=Path,
@@ -1751,13 +1808,18 @@ def main() -> None:
         args.datumctl_source = args.datumctl_source.resolve()
     args.datumctl_binary = None
     commands = Commands()
+    profile = selected(args.internal_pending_apps)
     fixtures = expected_fixture()
     fixture_contract(fixtures)
     source_role_guards(fixtures)
-    source = source_contract(commands, args.apps_source, args.apps_revision)
+    source = source_contract(commands, args.apps_source, args.apps_revision, profile)
+    if profile.pending:
+        require(args.apps_revision == pending_trial.SOURCE and args.datumctl_source is None,
+                "pending trial requires exact reviewed source and excludes optional CLI mode")
+        pending_trial.extend_contract(SimpleNamespace(**globals()), commands, args.apps_source, fixtures, source)
     if args.image_evidence:
-        image_contract(args.image_evidence.resolve())
-    print("Apps native offline contract PASS: exact source revision, two Project CRDs, "
+        image_contract(args.image_evidence.resolve(), profile)
+    print("Apps native offline contract PASS: exact selected source/profile, authoring two Project CRDs, "
           "two fail-closed webhook configurations, two-replica host overlay, scoped fixture",
           flush=True)
     if args.offline:
@@ -1774,8 +1836,7 @@ def main() -> None:
     args.host_kubeconfig = args.host_kubeconfig.resolve()
     args.milo_kubeconfig = args.milo_kubeconfig.resolve()
     if args.execute:
-        require(CONTENT_SAFE_BINARY_SHA == APPS_BINARY_SHA and
-                re.fullmatch(r"[0-9a-f]{40}", CONTENT_SAFE_BINARY_SHA) is not None,
+        require(profile in (AUTHORING, PENDING) and re.fullmatch(r"[0-9a-f]{40}", profile.binary) is not None,
                 "live native trial fenced until exact-content binary and image pins are published")
         args.test_infra_revision = harness_revision(commands)
     old_umask = os.umask(0o077)
@@ -1785,6 +1846,8 @@ def main() -> None:
             if args.datumctl_source is not None:
                 args.datumctl_binary = build_private_cli(args.datumctl_source, private)
             state = preflight(args, commands, source, fixtures, private)
+            if profile.pending:
+                pending_trial.preflight(SimpleNamespace(**globals()), state)
             print("Native Apps read-only preflight PASS: isolated contexts, exact node image, "
                   "real Projects and CA, no object collisions", flush=True)
             if args.execute:
