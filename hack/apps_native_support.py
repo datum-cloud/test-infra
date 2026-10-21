@@ -183,19 +183,33 @@ class UnixHTTPConnection(http.client.HTTPConnection):
 
 class APIProxy:
     def __init__(self, kube: Kube, private: Path, name: str):
-        self.kube, self.path = kube, private / f"{name}-api.sock"
+        require(private.is_dir() and not private.is_symlink() and
+                private.stat().st_mode & 0o077 == 0,
+                "private API proxy journal directory required")
+        # macOS rejects AF_UNIX paths longer than 103 bytes. Journals may be
+        # deeply nested, so only the ephemeral socket moves to a fresh 0700
+        # directory; the kubeconfig and recovery journal remain in `private`.
+        socket_dir = Path(tempfile.mkdtemp(prefix="apps-a1t-api-", dir="/tmp"))
+        self.kube, self.path, self.socket_dir = kube, socket_dir / "api.sock", socket_dir
+        if len(os.fsencode(self.path)) >= 100:
+            socket_dir.rmdir()
+            raise RuntimeError("private API proxy socket path exceeds platform bound")
         self.process: subprocess.Popen | None = None
 
     def start(self) -> None:
-        self.process = subprocess.Popen(
-            ["kubectl", "--kubeconfig", str(self.kube.config), "--context",
-             self.kube.context, "--request-timeout=10s", "proxy",
-             f"--unix-socket={self.path}"], stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL)
-        def socket_ready():
-            require(self.process.poll() is None, "private API proxy exited")
-            return self.path.is_socket()
-        wait_for(socket_ready, "private API proxy socket", 15)
+        try:
+            self.process = subprocess.Popen(
+                ["kubectl", "--kubeconfig", str(self.kube.config), "--context",
+                 self.kube.context, "--request-timeout=10s", "proxy",
+                 f"--unix-socket={self.path}"], stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            def socket_ready():
+                require(self.process.poll() is None, "private API proxy exited")
+                return self.path.is_socket()
+            wait_for(socket_ready, "private API proxy socket", 15)
+        except Exception:
+            self.close()
+            raise
 
     def delete(self, path: str, uid: str, rv: str) -> None:
         body = json.dumps({"apiVersion": "v1", "kind": "DeleteOptions",
@@ -235,14 +249,19 @@ class APIProxy:
             time.sleep(min(1, max(0, deadline - time.monotonic())))
 
     def close(self) -> None:
-        if self.process is None:
-            return
-        self.process.terminate()
+        if self.process is not None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=3)
+            self.process = None
+        self.path.unlink(missing_ok=True)
         try:
-            self.process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.process.wait(timeout=3)
+            self.socket_dir.rmdir()
+        except FileNotFoundError:
+            pass
 
 
 @dataclass
