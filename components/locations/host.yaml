@@ -1,0 +1,74 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-a1t-locations-host
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 3m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: apps-a1t-locations
+  path: ./config/base/manager
+  targetNamespace: locations-system
+  images:
+    - name: ghcr.io/milo-os/locations
+      digest: sha256:c888576073f66e14a3401c450df6bcf47dcb69259914bbb93acc654084c4d400
+  patches:
+    - target:
+        version: v1
+        kind: ConfigMap
+        name: locations-config
+      patch: |-
+        - op: replace
+          path: /data/config.yaml
+          value: |
+            apiVersion: apiserver.config.miloapis.com/v1alpha1
+            kind: LocationOperator
+            metricsServer:
+              bindAddress: "0"
+            kubeconfigPath: /etc/milo/kubeconfig
+            locationReadiness:
+              controllerName: locations.miloapis.com/datum-managed
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: locations-manager
+      patch: |-
+        - op: replace
+          path: /spec/replicas
+          value: 1
+        - op: replace
+          path: /spec/template/spec/containers/0/args
+          value:
+            - operator
+            - --health-probe-bind-address=:8081
+            - --server-config=/config/config.yaml
+        - op: add
+          path: /spec/template/spec/containers/0/volumeMounts/-
+          value:
+            name: milo-kubeconfig
+            mountPath: /etc/milo
+            readOnly: true
+        - op: add
+          path: /spec/template/spec/volumes/-
+          value:
+            name: milo-kubeconfig
+            secret:
+              secretName: milo-kubeconfig
+              defaultMode: 288
+        - op: add
+          path: /spec/template/spec/securityContext
+          value:
+            fsGroup: 65532
+        - op: add
+          path: /spec/template/spec/automountServiceAccountToken
+          value: false
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: locations-manager
+      namespace: locations-system
