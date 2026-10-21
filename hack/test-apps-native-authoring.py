@@ -128,6 +128,16 @@ def runtime_source_violations(source: Path, changed_paths: list[str]) -> list[st
     return ordinary
 
 
+def harness_revision(commands: Commands) -> str:
+    require(commands.run("git", "-C", str(ROOT), "status", "--porcelain",
+                         "--untracked-files=no") == "",
+            "tracked test-infra source is dirty; trial evidence cannot pin this harness")
+    revision = commands.run("git", "-C", str(ROOT), "rev-parse", "HEAD")
+    require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None,
+            "test-infra source has no exact commit")
+    return revision
+
+
 def source_contract(commands: Commands, source: Path, revision: str) -> dict:
     require(source.is_absolute() and source.is_dir(), "absolute Apps source checkout required")
     require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None,
@@ -1387,6 +1397,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
     evidence_file = Path(evidence_name)
     evidence_file.chmod(0o600)
     evidence = {"run_id": run_id, "source_revision": args.apps_revision,
+                "test_infra_revision": args.test_infra_revision,
                 "binary_revision": APPS_BINARY_SHA, "image_index": APPS_IMAGE,
                 "node_architecture": args.expected_architecture,
                 "platform_manifest": PLATFORM_DIGESTS[args.expected_architecture][0],
@@ -1692,6 +1703,7 @@ def main() -> None:
         require(CONTENT_SAFE_BINARY_SHA == APPS_BINARY_SHA and
                 re.fullmatch(r"[0-9a-f]{40}", CONTENT_SAFE_BINARY_SHA) is not None,
                 "live native trial fenced until exact-content binary and image pins are published")
+        args.test_infra_revision = harness_revision(commands)
     old_umask = os.umask(0o077)
     try:
         with tempfile.TemporaryDirectory(prefix="apps-a1t-native-private-") as temporary:

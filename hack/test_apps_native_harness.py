@@ -68,6 +68,17 @@ class ChangedProjectProxy(FakeProxy):
 
 
 class CleanupGatesTest(unittest.TestCase):
+    def test_live_harness_revision_requires_clean_tracked_source(self):
+        revision = "a" * 40
+        calls = []
+        def run(*argv):
+            calls.append(argv)
+            return revision if argv[-2:] == ("rev-parse", "HEAD") else ""
+        self.assertEqual(trial.harness_revision(SimpleNamespace(run=run)), revision)
+        self.assertEqual(calls[0][-3:], ("status", "--porcelain", "--untracked-files=no"))
+        with self.assertRaisesRegex(RuntimeError, "dirty"):
+            trial.harness_revision(SimpleNamespace(run=lambda *_: " M hack/script.py"))
+
     def test_lease_release_accepts_successor_without_deleting_it(self):
         old = {"metadata": {"uid": "fixture", "resourceVersion": "17"},
                "spec": {"holderIdentity": "run"}}
