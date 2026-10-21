@@ -45,6 +45,7 @@ SOURCE_CRDS = {
     "serviceentitlements.services.miloapis.com",
     "services.services.miloapis.com",
 }
+LOCATIONS_SHA = "507ac2cbd48c0228f09baea64199882eca91e865"
 
 
 def private_json(path: Path) -> dict:
@@ -53,6 +54,53 @@ def private_json(path: Path) -> dict:
     result = json.loads(path.read_text())
     require(isinstance(result, dict), "private journal must be an object")
     return result
+
+
+def active_installer_with_locations(host: Kube, milo: Kube, identity: dict,
+                                    installer_path: Path, locations_path: Path,
+                                    *, cleanup: bool) -> tuple[dict, dict]:
+    """Bind the later Locations auth extension to the original Catalog installer."""
+    private = locations_path.parent / "apps-a1t-locations-private"
+    require(locations_path.is_absolute() and installer_path.is_absolute() and
+            locations_path.parent == installer_path.parent and
+            not locations_path.parent.is_symlink() and
+            locations_path.parent.stat().st_mode & 0o077 == 0,
+            "Locations and installer journals must share the private fixture directory")
+    locations = private_json(locations_path)
+    require(locations.get("source") == LOCATIONS_SHA and
+            locations.get("scope_identity") == identity and
+            re.fullmatch(r"[0-9a-f]{24}", locations.get("run_id", "")) is not None and
+            re.fullmatch(r"[0-9a-f]{24}", locations.get("installer_run_id", "")) is not None,
+            "Locations auth journal does not bind the retained fixture")
+    if cleanup:
+        require(locations.get("cleanup") == "complete-with-retained-namespace" and
+                isinstance(locations.get("retained_namespace"), dict) and
+                locations["retained_namespace"].get("name") == "locations-system" and
+                bool(locations["retained_namespace"].get("uid")),
+                "Locations cleanup must precede Catalog OCI source prune")
+        installer, _ = active_catalog_installer(host, milo, identity, installer_path)
+        require(locations["installer_run_id"] == installer["run_id"],
+                "Locations cleanup journal differs from Catalog installer run")
+        return installer, locations
+    require(locations.get("cleanup") == "not-requested" and
+            locations.get("setup_stage") == "ready" and
+            private.is_dir() and not private.is_symlink() and
+            private.stat().st_mode & 0o077 == 0,
+            "active Locations auth required before Catalog OCI transition")
+    state = private_json(private / "state.json")
+    require(locations.get("run_id") == state.get("run_id") and
+            state.get("auth_intent") is True and
+            isinstance(state.get("old_b64"), str) and
+            isinstance(state.get("new_b64"), str) and
+            state.get("auth_uid"),
+            "Locations auth state does not bind the retained fixture")
+    installer, installer_state = active_catalog_installer(
+        host, milo, identity, installer_path, auth_allowed={state["new_b64"]})
+    require(state["auth_uid"] == installer_state["auth_uid"] and
+            state["old_b64"] == installer_state["new_b64"] and
+            locations.get("installer_run_id") == installer["run_id"],
+            "Locations auth does not extend exact Catalog installer state")
+    return installer, locations
 
 
 def clean_testinfra_source(commands: Commands) -> str:
@@ -384,8 +432,9 @@ def run(args: argparse.Namespace) -> None:
     identity = scope_identity(host, milo, args.host_context, args.milo_port,
                               projects_removed=args.cleanup and
                               project.get("cleanup") == "complete")
-    installer, _ = active_catalog_installer(host, milo, identity,
-                                            args.installer_evidence_file)
+    installer, locations = active_installer_with_locations(
+        host, milo, identity, args.installer_evidence_file,
+        args.locations_evidence_file, cleanup=args.cleanup)
     graph = private_json(args.catalog_api_evidence_file)
     require(graph.get("scope_identity") == identity and
             graph.get("installer_run_id") == installer["run_id"],
@@ -395,6 +444,7 @@ def run(args: argparse.Namespace) -> None:
         require(evidence.get("scope_identity") == identity and
                 evidence.get("testinfra_revision") == revision and
                 evidence.get("graph_run_id") == graph["run_id"] and
+                evidence.get("locations_run_id") == locations["run_id"] and
                 evidence.get("catalog_source") == CATALOG_SHA and
                 evidence.get("oci_digest") == OCI_DIGEST,
                 "transition recovery journal differs from current fixture")
@@ -426,7 +476,9 @@ def run(args: argparse.Namespace) -> None:
     desired["metadata"].setdefault("labels", {})[RUN_LABEL] = transition_run
     evidence = {"version": 1, "run_id": transition_run,
                 "testinfra_revision": revision,
-                "graph_run_id": graph["run_id"], "scope_identity": identity,
+                "graph_run_id": graph["run_id"],
+                "locations_run_id": locations["run_id"],
+                "scope_identity": identity,
                 "catalog_source": CATALOG_SHA, "oci_digest": OCI_DIGEST,
                 "render_sha256": contract["render_sha256"],
                 "original_git_uid": git["metadata"]["uid"],
@@ -445,7 +497,7 @@ def main() -> None:
                  "host-kubeconfig", "milo-kubeconfig", "catalog-api-evidence-file",
                  "installer-evidence-file", "evidence-file"):
         parser.add_argument("--" + name, type=Path, required=True)
-    parser.add_argument("--locations-evidence-file", type=Path)
+    parser.add_argument("--locations-evidence-file", type=Path, required=True)
     parser.add_argument("--host-context", required=True)
     parser.add_argument("--milo-port", type=int, required=True)
     parser.add_argument("--deadline-seconds", type=int, default=600)

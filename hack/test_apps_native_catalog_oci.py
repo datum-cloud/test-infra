@@ -31,6 +31,77 @@ class SourceSafetyTests(unittest.TestCase):
                      "ref": {"digest": OCI_DIGEST}},
         }
 
+    def test_locations_auth_extension_and_restored_cleanup_are_exact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            private = root / "apps-a1t-locations-private"
+            private.mkdir(mode=0o700)
+            installer_path = root / "catalog-installer.json"
+            locations_path = root / "locations.json"
+            state_path = private / "state.json"
+            identity = {"fixture": "original"}
+            locations = {"source": transition.LOCATIONS_SHA,
+                         "scope_identity": identity, "run_id": "a" * 24,
+                         "installer_run_id": "b" * 24,
+                         "cleanup": "not-requested", "setup_stage": "ready"}
+            state = {"run_id": "a" * 24, "auth_uid": "auth-uid",
+                     "auth_intent": True, "old_b64": "catalog-csv",
+                     "new_b64": "locations-csv"}
+            for path, data in ((locations_path, locations), (state_path, state)):
+                path.write_text(json.dumps(data))
+                path.chmod(0o600)
+            with mock.patch.object(transition, "active_catalog_installer",
+                                   return_value=({"run_id": "b" * 24},
+                                                 {"auth_uid": "auth-uid",
+                                                  "new_b64": "catalog-csv"})) as installer:
+                transition.active_installer_with_locations(
+                    object(), object(), identity, installer_path, locations_path,
+                    cleanup=False)
+                self.assertEqual(installer.call_args.kwargs["auth_allowed"],
+                                 {"locations-csv"})
+                state["old_b64"] = "foreign-csv"
+                state_path.write_text(json.dumps(state))
+                with self.assertRaisesRegex(RuntimeError, "does not extend"):
+                    transition.active_installer_with_locations(
+                        object(), object(), identity, installer_path,
+                        locations_path, cleanup=False)
+                state["old_b64"] = "catalog-csv"
+                state_path.write_text(json.dumps(state))
+                with self.assertRaisesRegex(RuntimeError, "cleanup must precede"):
+                    transition.active_installer_with_locations(
+                        object(), object(), identity, installer_path,
+                        locations_path, cleanup=True)
+                locations["cleanup"] = "complete-with-retained-namespace"
+                locations["retained_namespace"] = {
+                    "name": "locations-system", "uid": "owned-namespace-uid"}
+                locations_path.write_text(json.dumps(locations))
+                state_path.unlink()
+                private.rmdir()
+                transition.active_installer_with_locations(
+                    object(), object(), identity, installer_path, locations_path,
+                    cleanup=True)
+                self.assertNotIn("auth_allowed", installer.call_args.kwargs)
+                with self.assertRaisesRegex(RuntimeError, "active Locations auth required"):
+                    transition.active_installer_with_locations(
+                        object(), object(), identity, installer_path,
+                        locations_path, cleanup=False)
+                locations["scope_identity"] = {"fixture": "foreign"}
+                locations_path.write_text(json.dumps(locations))
+                installer.reset_mock()
+                with self.assertRaisesRegex(RuntimeError, "does not bind"):
+                    transition.active_installer_with_locations(
+                        object(), object(), identity, installer_path,
+                        locations_path, cleanup=True)
+                installer.assert_not_called()
+                locations["scope_identity"] = identity
+                locations["installer_run_id"] = "c" * 24
+                locations_path.write_text(json.dumps(locations))
+                with self.assertRaisesRegex(RuntimeError, "installer run"):
+                    transition.active_installer_with_locations(
+                        object(), object(), identity, installer_path,
+                        locations_path, cleanup=True)
+
     def test_source_intent_allows_only_flux_reconcile_marker(self):
         source = self.source()
         expected = transition.source_intent(source)
