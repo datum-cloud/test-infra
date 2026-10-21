@@ -498,6 +498,8 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_locations.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_locations_rbac.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_locations_rbac.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_cleanup_order.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_cleanup_order.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_projects.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_ci_capacity.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_forward_milo_reconnecting.py' -v

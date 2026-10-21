@@ -54,7 +54,8 @@ def _selected_cluster(config: dict, context: str, *, host: bool, port: int) -> d
 
 
 def scope_identity(host: Kube, milo: Kube, host_context: str, port: int,
-                   *, projects_removed: bool = False) -> dict:
+                   *, projects_removed: bool = False, projects_removing: bool = False) -> dict:
+    require(not (projects_removed and projects_removing), "ambiguous Project cleanup phase")
     require(re.fullmatch(r"kind-apps-a1t-ci-[a-z0-9-]+", host_context) is not None,
             "explicit task-owned Kind context required")
     host_cluster = _selected_cluster(host.json("config", "view", "--raw"),
@@ -72,7 +73,8 @@ def scope_identity(host: Kube, milo: Kube, host_context: str, port: int,
     require(bootstrap.get("host_context") == host_context and
             bootstrap.get("organization") == ORG and
             bootstrap.get("projects") == list(PROJECTS) and
-            bootstrap.get("cleanup") == ("complete" if projects_removed else "not-requested") and
+            bootstrap.get("cleanup") in ({"not-requested", "incomplete", "complete"} if projects_removing
+                else {"complete" if projects_removed else "not-requested"}) and
             set(uids) == {ORG, *PROJECTS} and
             all(isinstance(uid, str) and bool(uid) for uid in uids.values()),
             "Project bootstrap journal is not the retained owned fixture")
@@ -85,12 +87,16 @@ def scope_identity(host: Kube, milo: Kube, host_context: str, port: int,
             require(milo.optional(kind, name) is None,
                     f"Project bootstrap cleanup is incomplete: {name}")
             continue
-        obj = milo.json("get", kind, name)
+        obj = milo.optional(kind, name) if projects_removing else milo.json("get", kind, name)
+        if projects_removing and obj is None:
+            continue  # only the original UID can be present on a resumed cleanup
         metadata = obj.get("metadata", {})
         require(metadata.get("uid") == uids[name] and
                 metadata.get("labels", {}).get(RUN_LABEL) == run_id and
-                not metadata.get("deletionTimestamp"),
+                (projects_removing or not metadata.get("deletionTimestamp")),
                 f"retained Project bootstrap identity changed: {name}")
+        if projects_removing and name == ORG:
+            require(obj.get("spec", {}).get("type") == "Standard", "retained Organization type changed")
         if name != ORG:
             require(obj.get("spec", {}).get("ownerRef") == {
                 "kind": "Organization", "name": ORG},

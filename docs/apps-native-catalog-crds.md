@@ -44,3 +44,48 @@ Run `PYTHONDONTWRITEBYTECODE=1 task test-apps-native-offline`. This slice adds
 Catalog graph and Flux mutation/lost-reply tests plus a focused Project cleanup
 flag regression. Offline tests and strict renders do not establish live Milo
 lifecycle or authorization evidence. The later Locations slice remains separate.
+
+## Ordered cleanup while the installer holds Milo core
+
+Keep the scoped installer active until its Catalog CRD graph has been pruned.
+After Locations cleanup, run Project bootstrap cleanup with the original host
+and root kubeconfigs, context, loopback port, Organization and three Project
+names, adding all three options:
+
+```sh
+--cleanup --retain-root-kubeconfig --installer-evidence-file /absolute/private/run/catalog-installer-evidence.json
+```
+
+Installer-evidence mode requires `--retain-root-kubeconfig`; omitting it or
+passing false through a programmatic caller rejects before any Project deletion.
+The explicit evidence path allows only the installer's recorded suspension. It
+checks the original bootstrap UID set, live installer credentials and exact RBAC,
+CA/endpoint binding, current core UID/generation/full spec, and source
+UID/generation/full spec plus the exact guarded source and image. The core's
+only spec difference from its recorded original must be `suspend: true`.
+Fresh host/root readiness remains required; a suspended core is not required to
+report Ready for its new generation. No source, credential or suspension is
+changed by this check. Without this option, the ordinary unsuspended Ready
+source guard remains in force.
+
+Retry may find original Projects already absent or terminating, but never a
+replacement UID. A successful Project cleanup retains the private root config
+only with `--retain-root-kubeconfig`; by default it deletes the file. Failure
+always retains it. Next prune Catalog with its original source inputs and
+Locations evidence, then clean up the scoped installer to restore auth and
+resume Milo core. The retained empty Locations namespace belongs to the fixture
+owner; it is not a reason to cascade-delete host resources.
+
+Installer setup now journals the source UID, generation and full spec, plus the
+core's applied revision, before mutation. Older private installer journals
+without these fields cannot authorize suspended-core Project cleanup. Do not
+fill them from a current GET or treat a matching label as evidence of the old
+intent; retain the recovery capabilities for separate review. These checks are
+not a cross-object lock. Exclusive fixture ownership and a resilient Milo
+forward remain prerequisites throughout cleanup.
+
+`test_apps_native_cleanup_order.py` exercises the actual scope/credential checks
+with offline API doubles: changed core/source/auth/RBAC/evidence/UID denial,
+partial cleanup retry, default/failure credential retention, and exact retained
+namespace identity plus successful empty workload census. This evidence does
+not establish live Project deletion or operator teardown.

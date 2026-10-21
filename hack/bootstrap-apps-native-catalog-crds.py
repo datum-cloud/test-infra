@@ -309,9 +309,10 @@ def cleanup(host: Kube, milo: Kube, evidence: dict, path: Path,
                     locations.get("run_id") and
                 not locations_namespace["metadata"].get("deletionTimestamp"),
                 "retained Locations namespace identity or cleanup differs")
-        workloads = host.json("-n", "locations-system", "get",
-            "deployments,statefulsets,daemonsets,pods,jobs,cronjobs").get("items", [])
-        require(not workloads, "retained Locations namespace still has workloads")
+        census = host.json("-n", "locations-system", "get",
+            "deployments,statefulsets,daemonsets,replicasets,replicationcontrollers,pods,jobs,cronjobs")
+        require(isinstance(census, dict) and isinstance(census.get("items"), list) and
+                not census["items"], "retained Locations namespace workload census is unavailable or nonempty")
     require(milo.json("get", "projects.resourcemanager.miloapis.com")["items"] == [],
             "remove owned Projects before pruning their Catalog APIs")
     crds, _ = root_inventory(milo)

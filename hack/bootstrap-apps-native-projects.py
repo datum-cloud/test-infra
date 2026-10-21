@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 import time
 
+from apps_native_fixture_scope import scope_identity, active_catalog_installer
 from apps_native_support import APIProxy, Commands, Kube, RUN_LABEL, private_file, ready, require
 
 
@@ -320,6 +321,52 @@ def source_guard(host: Kube, *, cleanup: bool = False) -> None:
             "host Milo Flux source, overlay, or image differs from reviewed pin")
 
 
+def installer_cleanup_guard(host: Kube, milo: Kube, args, evidence: dict) -> None:
+    """Accept only the dedicated installer's journaled suspension during teardown."""
+    path = getattr(args, "installer_evidence_file", None)
+    require(args.cleanup and isinstance(path, Path) and path.is_absolute() and
+            not path.is_symlink(), "explicit private installer evidence required")
+    require(getattr(args, "retain_root_kubeconfig", False) is True,
+            "installer cleanup requires --retain-root-kubeconfig for dependent teardown")
+    identity = scope_identity(host, milo, args.host_context, args.milo_port, projects_removing=True)
+    require(evidence.get("uids") == identity["bootstrap_uids"] and
+            attempted_from_evidence(evidence) == identity["bootstrap_uids"],
+            "installer cleanup requires the complete original bootstrap UID set")
+    _, state = active_catalog_installer(host, milo, identity, path)
+    source = host.json("get", "gitrepository", "milo", "-n", "flux-system")
+    core = host.json("get", "kustomization", "milo-core", "-n", "flux-system")
+    revision = "200de48a305732720377cb83308d57c84fd5f688"
+    image = "sha256:784997aec9c3b1cf5dfc993e578b108e7ef627ff835982cb58e74d1b86378a5c"
+    original = state.get("core_spec")
+    require(isinstance(original, dict) and not original.get("suspend", False) and
+            state.get("core_suspend_intent") is True and state.get("auth_intent") is True and
+            type(state.get("core_generation")) is int and state["core_generation"] > 0 and
+            state.get("suspended_generation") == state["core_generation"] + 1 and
+            core["metadata"].get("uid") == state.get("core_uid") and
+            core["metadata"].get("generation") == state["suspended_generation"] and
+            not core["metadata"].get("deletionTimestamp") and
+            core.get("spec") == {**original, "suspend": True} and
+            original.get("path") == "./config/overlays/test-infra" and
+            original.get("sourceRef") == {"kind": "GitRepository", "name": "milo"} and
+            original.get("images") == [{"name": "ghcr.io/milo-os/milo", "digest": image}] and
+            state.get("core_applied_revision") == "sha1:" + revision and
+            core.get("status", {}).get("lastAppliedRevision") == state["core_applied_revision"],
+            "installer-owned Milo core identity, full spec or applied source changed")
+    require(isinstance(state.get("source_uid"), str) and state["source_uid"] and
+            source["metadata"].get("uid") == state["source_uid"] and
+            type(state.get("source_generation")) is int and state["source_generation"] > 0 and
+            source["metadata"].get("generation") == state["source_generation"] and
+            not source["metadata"].get("deletionTimestamp") and
+            source.get("spec") == state.get("source_spec") and
+            source["spec"].get("ref") == {"commit": revision} and
+            source["spec"].get("url") == "https://github.com/milo-os/milo.git" and
+            source.get("status", {}).get("artifact", {}).get("revision") == "sha1:" + revision and ready(source),
+            "installer-owned Milo Git source identity or full spec changed")
+    # Core Ready may refer to its pre-suspension generation. Fresh root/host
+    # readiness and complete source/credential checks above replace only that
+    # incompatible requirement; no suspension, credential or source is mutated.
+
+
 def organization_context_server(port: int) -> str:
     return f"https://127.0.0.1:{port}{ORG_PATH}/{ORG}/control-plane"
 
@@ -368,7 +415,10 @@ def run(args: argparse.Namespace) -> dict:
                          host_config["clusters"][0]["cluster"]["server"]) is not None,
             "host kubeconfig must use loopback Kind API")
     require(host.k("get", "--raw", "/readyz") == "ok", "host Kind API not ready")
-    source_guard(host, cleanup=args.cleanup)
+    installer_path = getattr(args, "installer_evidence_file", None)
+    require(args.cleanup or installer_path is None, "installer evidence is cleanup-only")
+    if installer_path is None:
+        source_guard(host, cleanup=args.cleanup)
     evidence_file = args.root_kubeconfig.parent / "apps-a1t-project-bootstrap-evidence.json"
     if args.cleanup:
         require(not evidence_file.is_symlink(), "bootstrap evidence symlink refused")
@@ -384,6 +434,8 @@ def run(args: argparse.Namespace) -> dict:
                                     sensitive=True))
         exact_config(config, "milo-root", f"https://127.0.0.1:{args.milo_port}")
         wait_milo_ready(milo, min(commands.deadline, time.monotonic() + 30))
+        if installer_path is not None:
+            installer_cleanup_guard(host, milo, args, evidence)
         cleanup_evidenced(milo, args.root_kubeconfig, evidence_file, evidence,
                           commands.deadline)
         if getattr(args, "retain_root_kubeconfig", False):
@@ -483,9 +535,12 @@ def main() -> None:
     parser.add_argument("--projects", required=True)
     parser.add_argument("--deadline-seconds", type=int, default=600)
     parser.add_argument("--cleanup", action="store_true")
+    parser.add_argument("--installer-evidence-file", type=Path,
+                        help="exact active Catalog installer evidence for owned suspended-core cleanup")
     parser.add_argument("--retain-root-kubeconfig", action="store_true",
                         help="retain private root config after UID-safe Project cleanup for dependent API teardown")
     args = parser.parse_args()
+    require(args.cleanup or args.installer_evidence_file is None, "installer evidence is cleanup-only")
     require(args.cleanup or not args.retain_root_kubeconfig,
             "--retain-root-kubeconfig is valid only with --cleanup")
     require(args.organization == ORG and args.projects.split(",") == list(PROJECTS),
