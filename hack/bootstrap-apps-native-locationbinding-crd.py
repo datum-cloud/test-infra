@@ -339,16 +339,29 @@ def installer_probe_config(host: Kube, identity: dict, private: Path,
     return probe_dir, probe_path
 
 
-def authorization_probes(probe: Kube) -> None:
+def authorization_probes(probe: Kube, record=None) -> None:
+    def check(verb: str, resource: str, expected: bool,
+              name: str | None = None) -> None:
+        operation = {"verb": verb, "resource": resource, "expected": expected,
+                     "name": name}
+        if record is not None:
+            record({**operation, "state": "started"})
+        if name is None:
+            probe.can_i(verb, resource, expected)
+        else:
+            probe.can_i(verb, resource, expected, name)
+        if record is not None:
+            record({**operation, "state": "passed"})
+
     for verb in ("get", "patch", "update", "delete"):
-        probe.can_i(verb, "customresourcedefinitions.apiextensions.k8s.io", True,
-                    CRD_NAME)
-        probe.can_i(verb, "customresourcedefinitions.apiextensions.k8s.io", False,
-                    "foreign.networking.datumapis.com")
+        check(verb, "customresourcedefinitions.apiextensions.k8s.io", True,
+              CRD_NAME)
+        check(verb, "customresourcedefinitions.apiextensions.k8s.io", False,
+              "foreign.networking.datumapis.com")
     for verb, resource in (("get", "secrets"),
                            ("create", "clusterroles.rbac.authorization.k8s.io"),
                            ("impersonate", "users")):
-        probe.can_i(verb, resource, False)
+        check(verb, resource, False)
 
 
 def no_locationbindings(milo: Kube) -> None:
@@ -578,7 +591,10 @@ def run(args: argparse.Namespace) -> None:
                                                        args.evidence_file.parent,
                                                        args.milo_port)
         try:
-            authorization_probes(Kube(commands, probe_path, "milo"))
+            def record_probe(operation: dict) -> None:
+                evidence["authorization_probe"] = operation
+                atomic_json(args.evidence_file, evidence)
+            authorization_probes(Kube(commands, probe_path, "milo"), record_probe)
         finally:
             probe_path.unlink(missing_ok=True)
             probe_dir.rmdir()

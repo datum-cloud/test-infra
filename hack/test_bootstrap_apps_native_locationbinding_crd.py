@@ -132,6 +132,30 @@ class FakeMilo:
 
 
 class CleanupSafetyTests(unittest.TestCase):
+    def test_failed_authorization_probe_records_only_operation_before_request(self):
+        class Probe:
+            calls = 0
+            def can_i(self, *_):
+                self.calls += 1
+                if self.calls == 2:
+                    raise RuntimeError("test-only SSAR failure")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            evidence = {"run_id": "a" * 24}
+            def record(operation):
+                evidence["authorization_probe"] = operation
+                fixture.atomic_json(path, evidence)
+            with self.assertRaisesRegex(RuntimeError, "SSAR failure"):
+                fixture.authorization_probes(Probe(), record)
+            observed = json.loads(path.read_text())
+            self.assertEqual(observed["authorization_probe"], {
+                "verb": "get",
+                "resource": "customresourcedefinitions.apiextensions.k8s.io",
+                "expected": False,
+                "name": "foreign.networking.datumapis.com",
+                "state": "started"})
+            self.assertEqual(set(observed), {"run_id", "authorization_probe"})
+
     def test_installer_probe_uses_distinct_private_owned_files(self):
         ca = b"public test CA"
         source = {"current-context": "milo",
