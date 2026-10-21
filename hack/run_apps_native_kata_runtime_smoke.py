@@ -294,6 +294,15 @@ def get_node_uid(kubeconfig: Path, context: str, name: str, env: dict[str, str],
     return meta["uid"], status.get("nodeInfo", {}).get("kernelVersion", ""), node
 
 
+def read_inotify_capacity(profile: str, env: dict[str, str]) -> int:
+    value = run(["colima", "ssh", "--profile", profile, "--", "cat",
+                 "/proc/sys/fs/inotify/max_user_instances"], env)
+    require(re.fullmatch(r"[0-9]{1,10}", value) is not None and int(value) >= 1024,
+            "dedicated VM requires fs.inotify.max_user_instances >= 1024 before adding a member; "
+            f"observed {value[:64]!r}")
+    return int(value)
+
+
 def preflight(profile: str, host_cluster: str, host_evidence: Path,
               member_cluster: str, private_dir: Path, *, cleanup: bool = False,
               cleanup_intent: bool = False) -> dict:
@@ -332,6 +341,7 @@ def preflight(profile: str, host_cluster: str, host_evidence: Path,
     require(current == host_context, "private host kubeconfig context is not the selected dedicated host")
     host_uid, _, host_node_doc = get_node_uid(host_kubeconfig, host_context, host_node, env)
     member_present = member_cluster in clusters
+    inotify_capacity = None
     if cleanup:
         if member_present:
             member_node = f"{member_cluster}-control-plane"
@@ -343,10 +353,14 @@ def preflight(profile: str, host_cluster: str, host_evidence: Path,
     else:
         require(member_cluster not in clusters, "member cluster already exists; refusing adoption")
         require(not private_dir.exists(), "private smoke evidence path already exists; refusing reuse")
+        # Host and member containers share the VM root UID's inotify allowance.
+        # Low capacity must prevent creation, but must never obstruct cleanup.
+        inotify_capacity = read_inotify_capacity(profile, env)
     return {"dockerEnv": env, "hostKubeconfig": host_kubeconfig,
             "hostNodeID": host_node_id, "hostNodeUID": host_uid,
             "hostAPIServer": host_api_server, "hostCASHA256": host_ca_sha256,
             "hostNode": host_node, "cpuCount": int(cpu_count_text),
+            "inotifyMaxUserInstances": inotify_capacity,
             "memberNode": f"{member_cluster}-control-plane", "memberPresent": member_present}
 
 
@@ -609,6 +623,7 @@ def setup_member(profile: str, host_cluster: str, host_evidence: Path,
         "sourceRevision": source_revision, "runtimeClass": lock["runtimeClass"],
         "smokeImage": lock["smokeImage"], "smokeImageArm64Manifest": lock["smokeImageArm64Manifest"],
         "cpuCountAtPreflight": baseline["cpuCount"], "phase": "create-intent",
+        "inotifyMaxUserInstancesAtPreflight": baseline["inotifyMaxUserInstances"],
         "createdAtUnix": int(time.time()),
     }
     write_journal(private_dir, journal, create=True)
