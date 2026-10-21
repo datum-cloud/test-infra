@@ -23,6 +23,9 @@ on:
       - hack/apps_native_catalog_operator_contract.py
       - hack/bootstrap-apps-native-catalog-operator.py
       - hack/test_apps_native_catalog_operator.py
+      - hack/bootstrap-apps-native-service.py
+      - hack/test_bootstrap_apps_native_service.py
+      - docs/apps-native-service-catalog-lifecycle.md
       - components/service-catalog/operator-ca/**
       - docs/apps-native-catalog-operator-runtime.md
       - components/service-catalog/api-crds.yaml
