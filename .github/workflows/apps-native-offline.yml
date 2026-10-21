@@ -26,6 +26,7 @@ on:
       - components/service-catalog/installer-rbac.yaml
       - docs/apps-native-catalog-installer.md
       - hack/apps_native_support.py
+      - hack/test_apps_native_api_proxy_socket.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
       - hack/apps_native_cli/**
@@ -61,6 +62,7 @@ on:
       - components/service-catalog/installer-rbac.yaml
       - docs/apps-native-catalog-installer.md
       - hack/apps_native_support.py
+      - hack/test_apps_native_api_proxy_socket.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
       - hack/apps_native_cli/**

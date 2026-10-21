@@ -444,9 +444,15 @@ class MiloRolloutObservationTest(unittest.TestCase):
 
 
 class PrivateAPIReadRetryTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='apps-native-proxy-test-')
+        self.addCleanup(self.directory.cleanup)
+
     def proxy(self):
-        return trial.APIProxy(SimpleNamespace(commands=SimpleNamespace(deadline=None)),
-                              Path('/tmp'), 'offline-test')
+        proxy = trial.APIProxy(SimpleNamespace(commands=SimpleNamespace(deadline=None)),
+                               Path(self.directory.name), 'offline-test')
+        self.addCleanup(proxy.close)
+        return proxy
 
     def connection(self, status, body):
         connection = mock.Mock()
