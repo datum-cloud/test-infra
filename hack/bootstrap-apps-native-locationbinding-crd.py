@@ -311,17 +311,25 @@ def delete_owned(cluster: Kube, proxy: APIProxy, key: str, manifest: dict,
 
 
 def installer_probe_config(host: Kube, identity: dict, private: Path,
-                           milo_port: int) -> tuple[Path, Path]:
+                           milo_port: int) -> tuple[Path, Path, str]:
     secret = host.json("-n", "milo-system", "get", "secret",
                        "apps-a1t-catalog-installer-kubeconfig")
     config = yaml.safe_load(base64.b64decode(
         secret["data"]["kubeconfig"], validate=True))
-    require(config.get("current-context") == "milo" and
+    require(config.get("current-context") == "catalog-installer" and
             len(config.get("clusters", [])) == 1 and
+            len(config.get("contexts", [])) == 1 and
             len(config.get("users", [])) == 1,
             "scoped Catalog installer config shape changed")
+    require(config["contexts"][0] == {"name": "catalog-installer",
+            "context": {"cluster": "milo", "user": "apps-a1t-catalog-installer"}} and
+            config["clusters"][0].get("name") == "milo" and
+            config["users"][0].get("name") == "apps-a1t-catalog-installer" and
+            set(config["users"][0].get("user", {})) == {"token"},
+            "scoped Catalog installer context or user changed")
     settings = config["clusters"][0]["cluster"]
-    require(settings.get("server") == "https://milo-apiserver.milo-system.svc:6443" and
+    require(settings.get("server") ==
+            "https://milo-apiserver.milo-system.svc.cluster.local:6443" and
             hashlib.sha256(base64.b64decode(
                 settings["certificate-authority-data"], validate=True)).hexdigest() ==
             identity["milo"]["ca_sha256"] and
@@ -336,7 +344,7 @@ def installer_probe_config(host: Kube, identity: dict, private: Path,
         probe_path.unlink(missing_ok=True)
         probe_dir.rmdir()
         raise
-    return probe_dir, probe_path
+    return probe_dir, probe_path, config["current-context"]
 
 
 def authorization_probes(probe: Kube, record=None) -> None:
@@ -586,15 +594,15 @@ def run(args: argparse.Namespace) -> None:
         stage("supplemental-role")
         create_owned(milo, "role", manifest_set["role"], evidence, args.evidence_file)
         create_owned(milo, "binding", manifest_set["binding"], evidence, args.evidence_file)
-        stage("installer-authorization-probes")
-        probe_dir, probe_path = installer_probe_config(host, identity,
-                                                       args.evidence_file.parent,
-                                                       args.milo_port)
+        stage("installer-probe-config")
+        probe_dir, probe_path, probe_context = installer_probe_config(
+            host, identity, args.evidence_file.parent, args.milo_port)
         try:
+            stage("installer-authorization-probes")
             def record_probe(operation: dict) -> None:
                 evidence["authorization_probe"] = operation
                 atomic_json(args.evidence_file, evidence)
-            authorization_probes(Kube(commands, probe_path, "milo"), record_probe)
+            authorization_probes(Kube(commands, probe_path, probe_context), record_probe)
         finally:
             probe_path.unlink(missing_ok=True)
             probe_dir.rmdir()

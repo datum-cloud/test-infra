@@ -18,6 +18,10 @@ SOURCE = Path(__file__).with_name("bootstrap-apps-native-locationbinding-crd.py"
 spec = importlib.util.spec_from_file_location("locationbinding_fixture", SOURCE)
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
+INSTALLER_SOURCE = Path(__file__).with_name("bootstrap-apps-native-catalog-installer.py")
+installer_spec = importlib.util.spec_from_file_location("catalog_installer_source", INSTALLER_SOURCE)
+installer_source = importlib.util.module_from_spec(installer_spec)
+installer_spec.loader.exec_module(installer_source)
 
 
 class RenderContractTests(unittest.TestCase):
@@ -158,29 +162,38 @@ class CleanupSafetyTests(unittest.TestCase):
 
     def test_installer_probe_uses_distinct_private_owned_files(self):
         ca = b"public test CA"
-        source = {"current-context": "milo",
-                  "clusters": [{"cluster": {"server":
-                    "https://milo-apiserver.milo-system.svc:6443",
-                    "certificate-authority-data": base64.b64encode(ca).decode()}}],
-                  "users": [{"user": {"token": "test-only-token"}}]}
+        source = installer_source.kubeconfig(
+            base64.b64encode(ca).decode(), "test-only-token")
         class Host:
             def json(self, *args):
                 return {"data": {"kubeconfig": base64.b64encode(
                     yaml.safe_dump(source).encode()).decode()}}
         identity = {"milo": {"ca_sha256": hashlib.sha256(ca).hexdigest()}}
         with tempfile.TemporaryDirectory() as directory:
-            first_dir, first_path = fixture.installer_probe_config(
+            first_dir, first_path, first_context = fixture.installer_probe_config(
                 Host(), identity, Path(directory), 43443)
             first_data = first_path.read_bytes()
-            second_dir, second_path = fixture.installer_probe_config(
+            second_dir, second_path, second_context = fixture.installer_probe_config(
                 Host(), identity, Path(directory), 45443)
             self.assertNotEqual(first_dir, second_dir)
             self.assertEqual(first_data, first_path.read_bytes())
+            self.assertEqual(first_context, source["current-context"])
+            self.assertEqual(second_context, source["current-context"])
             self.assertEqual(stat.S_IMODE(first_dir.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(first_path.stat().st_mode), 0o600)
             self.assertEqual(yaml.safe_load(second_path.read_text())
                              ["clusters"][0]["cluster"]["server"],
                              "https://127.0.0.1:45443")
+            changed = copy.deepcopy(source)
+            changed["clusters"][0]["cluster"]["server"] = \
+                "https://milo-apiserver.milo-system.svc:6443"
+            class WrongHost:
+                def json(self, *args):
+                    return {"data": {"kubeconfig": base64.b64encode(
+                        yaml.safe_dump(changed).encode()).decode()}}
+            with self.assertRaisesRegex(RuntimeError, "CA or origin changed"):
+                fixture.installer_probe_config(WrongHost(), identity,
+                                               Path(directory), 43443)
 
     def test_foreign_project_or_binding_blocks_crd_prune(self):
         with self.assertRaisesRegex(RuntimeError, "foreign or missing Project"):
