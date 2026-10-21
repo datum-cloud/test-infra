@@ -9,8 +9,9 @@ replace Project lookup or SubjectAccessReview handling with fake endpoints.
 The verified source pins for the passing run were:
 
 - Milo `ba4b06e8dde99dd70e9a2f34e011d635e4408a76` (the baseline used by the live test-infra deployment)
-- Apps `19b331f6812bd94c93d7b09d8754f2016353ae87`
-- Test-infra base `7c1987912760005b38146bfa8f1fef9452b7749e`
+- Apps `ccb6cedf6e5a8b29ec1ac74e1dfdaa5ff3db6f23`
+- datumctl `28f4d364302a9df451b7a453cce1ce1cb99ce0a0`
+- Test-infra base `e53f1dba48358da60fff62a1122eec86799eee6c`
 
 The Apps binary included the authoring quota and separate health-listener
 flags from the stated pin. The Milo test launcher is kept in
@@ -51,38 +52,57 @@ bridge. The existing IPAM cluster prerequisite registers its real service
 name, namespace, and CA and verifies a live API request, but that is not a
 claim that this local fixture reproduces cluster networking.
 
-The run verified APIService discovery; template create, update, and two-entry
-immutable revision history; Project UID and effective actor UID attribution;
+The datumctl portion invokes the exact exported `internal/cmd/apps.Command`
+from the pinned CLI commit through this launcher:
+`hack/datumctl-apps-aggregation-launcher/main.go`. Its wrapper reads the
+generated bearer-token kubeconfig and maps `--project` through the pinned
+CLI's `miloapi.ProjectControlPlaneURL` helper. It does not run the full
+datumctl OAuth login/session/root-factory path; production IAM is unproven.
+Through Milo's real project APIService route, it verifies history, read-only
+diff, dry-run restore with unchanged state, exact-definition restore creating
+a new revision, foreign-Project revision rejection, dry-run delete with
+unchanged state, UID/resourceVersion delete retaining history, same-name
+recreation with a new UID, rejection of a stale delete, and history access by
+the deleted UID.
+
+The run verifies APIService discovery; template create/update and immutable
+revision history; Project UID and effective actor UID attribution;
 cross-Project isolation; spoofed incoming `X-Remote-*` headers ignored; an
-unauthorized aggregated create denied; and a separate request routed to Apps
-with a real Milo SAR denial. Audit summaries confirmed the Apps root identity
-created SARs for both the allowed and denied subject. The test-only RBAC
-fixtures prove the request plumbing and resource scoping under Milo RBAC. They
-do not prove production IAM/FGA policy, trusted ownership writers, native App
-installation, or live workload traffic.
+unauthorized aggregate create denied; a separate real Milo SAR denial; and
+the datumctl command behaviors above. Audit summaries confirm the Apps root
+identity created SARs for allowed and denied subjects. The test-only RBAC
+fixtures prove request plumbing and project resource scoping under Milo RBAC.
+They do not prove production IAM/FGA policy, the full datumctl login path,
+trusted ownership writers, native App installation, or live workload traffic.
 
 ## Reproduction
 
 `hack/build-and-test-apps-authoring-aggregation.py` verifies each source
 checkout is at the exact pinned `HEAD` and has no tracked, staged, or
-untracked changes before building. It then permits exactly one Milo source
-addition, `cmd/milo/appsaggregationprobe/main.go`, and byte-compares it with
-the launcher checked into this test-infra revision. Apps remains clean. The
-helper builds both binaries from those checked-out sources with `-buildvcs`
-and private temporary Go caches, requires Milo `vcs.modified=true` (the
-single launcher addition) and Apps `vcs.modified=false`, then executes the
-integration proof. Binary build metadata supplements these source-tree checks;
-revision metadata alone is not treated as provenance.
+untracked changes before building. It permits exactly one byte-verified
+untracked launcher in Milo and one in datumctl; Apps remains clean. The helper
+builds all three from those source trees, requires `vcs.modified=true` for the
+two launcher builds and `vcs.modified=false` for Apps, then executes the
+integration proof. It restores both source trees to clean status in a
+`finally` block. Binary metadata supplements these source-tree checks;
+revision metadata alone is not treated as provenance. All three builds use
+temporary compiler caches and the supplied module cache; datumctl selects its
+pinned Go 1.26.9 toolchain from that cache.
 
 ```sh
 git clone https://github.com/milo-os/milo /tmp/milo-source
 git -C /tmp/milo-source checkout ba4b06e8dde99dd70e9a2f34e011d635e4408a76
 git clone https://github.com/datum-labs/apps /tmp/apps-source
-git -C /tmp/apps-source checkout 19b331f6812bd94c93d7b09d8754f2016353ae87
+git -C /tmp/apps-source checkout ccb6cedf6e5a8b29ec1ac74e1dfdaa5ff3db6f23
+git clone https://github.com/datum-cloud/datumctl /tmp/datumctl-source
+git -C /tmp/datumctl-source checkout 28f4d364302a9df451b7a453cce1ce1cb99ce0a0
 ETCD_BIN=/path/to/etcd
+DATUMCTL_GOMODCACHE=/path/to/go-mod-cache-with-go1.26.9
 python3 hack/build-and-test-apps-authoring-aggregation.py \
   --milo-source /tmp/milo-source \
   --apps-source /tmp/apps-source \
+  --datumctl-source /tmp/datumctl-source \
+  --datumctl-mod-cache "$DATUMCTL_GOMODCACHE" \
   --etcd-binary "$ETCD_BIN"
 ```
 

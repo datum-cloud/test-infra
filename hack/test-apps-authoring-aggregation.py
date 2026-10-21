@@ -4,7 +4,8 @@ import argparse, base64, datetime, http.client, json, os, pathlib, signal, socke
 import subprocess, sys, tempfile, threading, time, urllib.error, urllib.request, uuid
 
 MILO_PIN = "ba4b06e8dde99dd70e9a2f34e011d635e4408a76"
-APPS_PIN = "19b331f6812bd94c93d7b09d8754f2016353ae87"
+APPS_PIN = "ccb6cedf6e5a8b29ec1ac74e1dfdaa5ff3db6f23"
+DATUMCTL_PIN = "28f4d364302a9df451b7a453cce1ce1cb99ce0a0"
 PROJECT = "resourcemanager.miloapis.com"
 GROUP = "apps.miloapis.com"
 SERVICE = "apps-authoring.apps-system.svc:8443"
@@ -142,14 +143,15 @@ class Connect:
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument("--milo-binary",required=True,type=pathlib.Path); p.add_argument("--apps-binary",required=True,type=pathlib.Path); p.add_argument("--etcd-binary",required=True,type=pathlib.Path)
-    p.add_argument("--milo-source-sha",required=True); p.add_argument("--apps-source-sha",required=True)
+    p.add_argument("--milo-binary",required=True,type=pathlib.Path); p.add_argument("--apps-binary",required=True,type=pathlib.Path); p.add_argument("--datumctl-binary",required=True,type=pathlib.Path); p.add_argument("--etcd-binary",required=True,type=pathlib.Path)
+    p.add_argument("--milo-source-sha",required=True); p.add_argument("--apps-source-sha",required=True); p.add_argument("--datumctl-source-sha",required=True)
     a=p.parse_args()
-    if a.milo_source_sha!=MILO_PIN or a.apps_source_sha!=APPS_PIN:raise SystemExit("pinned source mismatch")
+    if a.milo_source_sha!=MILO_PIN or a.apps_source_sha!=APPS_PIN or a.datumctl_source_sha!=DATUMCTL_PIN:raise SystemExit("pinned source mismatch")
     # Source cleanliness is established by the build helper; Go build metadata
     # is an additional consistency check, not source provenance by itself.
     verify_binary(a.milo_binary,MILO_PIN,True)
     verify_binary(a.apps_binary,APPS_PIN,False)
+    verify_binary(a.datumctl_binary,DATUMCTL_PIN,True)
     with tempfile.TemporaryDirectory(prefix="apps-aggregation-") as td:
         d=pathlib.Path(td); os.chmod(d,0o700)
         mp,ap,ep,cp,hp=[freeport() for _ in range(5)]
@@ -220,6 +222,25 @@ contexts:
     user: root
 current-context: root
 """); os.chmod(kube,0o600)
+            cli_kube=d/"datumctl-author.kubeconfig"
+            cli_kube.write_text(f"""apiVersion: v1
+kind: Config
+clusters:
+- name: root
+  cluster:
+    server: https://127.0.0.1:{mp}
+    certificate-authority: {mca}
+users:
+- name: author
+  user:
+    token: {tokens['author']}
+contexts:
+- name: author
+  context:
+    cluster: root
+    user: author
+current-context: author
+"""); os.chmod(cli_kube,0o600)
             appenv=os.environ.copy()
             app=start([str(a.apps_binary),f"--listen=127.0.0.1:{ap}",f"--health-listen=127.0.0.1:{hp}",f"--tls-cert-file={acert}",f"--tls-private-key-file={akey}",f"--requestheader-client-ca-file={pca}","--requestheader-allowed-names=milo-aggregation-probe",f"--milo-kubeconfig={kube}",f"--etcd-endpoints=http://127.0.0.1:{ep}","--etcd-prefix=/apps-authoring-proof","--allow-insecure-loopback-etcd","--authoring-max-project-templates=100","--authoring-max-project-revisions=1000","--authoring-max-project-bytes=4194304"],name="apps")
             wait(f"http://127.0.0.1:{hp}/readyz",timeout=30)
@@ -243,6 +264,16 @@ current-context: root
                 code,value=req(base+path,tokens["admin"],method,obj,ctx=tls)
                 if expected is not None and code!=expected:raise RuntimeError(f"Milo {method} {path}: {code}, expected {expected}: {value.get('message','') if isinstance(value,dict) else ''}")
                 return value
+            def datumctl(*args, expected=0, error_contains=""):
+                cli_env=os.environ.copy();cli_env["KUBECONFIG"]=str(cli_kube)
+                result=subprocess.run([str(a.datumctl_binary),"apps",*args,"--project","apps-proof-a"],env=cli_env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=15)
+                if (result.returncode==0)!=(expected==0):
+                    message=result.stderr.strip().replace(tokens["author"],"<redacted>")
+                    raise RuntimeError(f"datumctl {' '.join(args[:4])} exited {result.returncode}, expected {expected}: {message[:400]}")
+                if error_contains and error_contains not in result.stderr:
+                    message=result.stderr.strip().replace(tokens["author"],"<redacted>")
+                    raise RuntimeError(f"datumctl {' '.join(args[:4])} did not report expected denial ({error_contains!r}): {message[:400]}")
+                return result.stdout
             # API fixtures are actual resources stored by Milo; no Project/SAR handler is substituted.
             root("POST","/api/v1/namespaces",{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"apps-system"}},201)
             root("POST",f"/apis/{PROJECT}/v1alpha1/organizations",{"apiVersion":f"{PROJECT}/v1alpha1","kind":"Organization","metadata":{"name":"apps-proof-org"},"spec":{"type":"Standard","contactInfo":{"email":"owner@example.test","name":"Owner"}}},201)
@@ -252,7 +283,7 @@ current-context: root
                 puids[name]=obj["metadata"]["uid"]
             root("POST","/apis/rbac.authorization.k8s.io/v1/clusterroles",{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"apps-proof-root"},"rules":[{"apiGroups":[PROJECT],"resources":["projects"],"verbs":["get"]},{"apiGroups":["authorization.k8s.io"],"resources":["subjectaccessreviews"],"verbs":["create"]}]},201)
             root("POST","/apis/rbac.authorization.k8s.io/v1/clusterrolebindings",{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"apps-proof-root"},"roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":"apps-proof-root"},"subjects":[{"kind":"User","apiGroup":"rbac.authorization.k8s.io","name":"apps-aggregation-service"}]},201)
-            root("POST","/apis/rbac.authorization.k8s.io/v1/clusterroles",{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"apps-proof-author"},"rules":[{"apiGroups":[GROUP],"resources":["apptemplates","apptemplaterevisions"],"verbs":["get","list","create","update","patch"]}]},201)
+            root("POST","/apis/rbac.authorization.k8s.io/v1/clusterroles",{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"apps-proof-author"},"rules":[{"apiGroups":[GROUP],"resources":["apptemplates","apptemplaterevisions"],"verbs":["get","list","create","update","patch","delete"]}]},201)
             root("POST","/apis/rbac.authorization.k8s.io/v1/clusterrolebindings",{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"apps-proof-author"},"roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":"apps-proof-author"},"subjects":[{"kind":"Group","apiGroup":"rbac.authorization.k8s.io","name":"template-authors"}]},201)
             # Milo's pinned default ServiceResolver constructs the standard
             # <service>.<namespace>.svc DNS URL without querying Service CRUD.
@@ -288,6 +319,60 @@ current-context: root
             if code!=200:raise RuntimeError(f"aggregated update failed ({code})")
             code,hist=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
             if code!=200 or len(hist.get("items",[]))!=2:raise RuntimeError("revision history count mismatch")
+            first_revision=min(hist["items"],key=lambda r:r["spec"]["sequence"])
+            cli_history=json.loads(datumctl("templates","history","probe"))
+            if cli_history.get("templateUID")!=first["metadata"]["uid"] or len(cli_history.get("revisions",[]))!=2:
+                raise RuntimeError("datumctl history did not select the current template UID")
+            diff=datumctl("templates","diff","probe","--revision",first_revision["metadata"]["name"])
+            if "initial" not in diff or "updated" not in diff:
+                raise RuntimeError("datumctl diff did not show the expected current/revision definitions")
+            before_restore_count=len(hist["items"])
+            datumctl("templates","restore","probe","--revision",first_revision["metadata"]["name"],"--dry-run=server")
+            code,after_dry=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            code,current=req(tpl+"/probe",tokens["author"],ctx=tls)
+            if code!=200 or len(after_dry.get("items",[]))!=before_restore_count or current["spec"].get("description")!="updated":
+                raise RuntimeError("datumctl restore dry-run changed persisted authoring or history")
+            bprox=base+f"/apis/{PROJECT}/v1alpha1/projects/apps-proof-b/control-plane/apis/{GROUP}/v1alpha1"
+            foreign_body={"apiVersion":f"{GROUP}/v1alpha1","kind":"AppTemplate","metadata":{"name":"foreign"},"spec":{"description":"foreign","inputSchema":{"type":"object","additionalProperties":False,"properties":{}},"components":[],"outputs":[]}}
+            code,foreign=req(bprox+"/apptemplates",tokens["author"],"POST",foreign_body,ctx=tls)
+            if code!=201:raise RuntimeError(f"foreign project template setup failed ({code})")
+            code,foreign_history=req(bprox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            foreign_revision=next((r for r in foreign_history.get("items",[]) if r["spec"]["templateUID"]==foreign["metadata"]["uid"]),None)
+            if foreign_revision is None:raise RuntimeError("foreign Project revision fixture missing")
+            datumctl("templates","restore","probe","--revision",foreign_revision["metadata"]["name"],expected=1,error_contains="unavailable in this project")
+            code,after_foreign=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            if code!=200 or len(after_foreign.get("items",[]))!=before_restore_count:
+                raise RuntimeError("foreign Project revision changed current Project history")
+            restored=datumctl("templates","restore","probe","--revision",first_revision["metadata"]["name"])
+            restore_summary=json.loads(restored)
+            code,current=req(tpl+"/probe",tokens["author"],ctx=tls)
+            code,after_restore=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            latest=max(after_restore.get("items",[]),key=lambda r:r["spec"]["sequence"])
+            if code!=200 or len(after_restore.get("items",[]))!=before_restore_count+1 or restore_summary.get("action")!="restored" or current["spec"]!=first["spec"] or latest["spec"]["definition"]!=first["spec"]:
+                raise RuntimeError("datumctl restore did not accept the exact immutable definition")
+            old_uid=current["metadata"]["uid"]; old_rv=current["metadata"]["resourceVersion"]
+            history_before_delete=len(after_restore.get("items",[]))
+            datumctl("templates","delete","probe","--uid",old_uid,"--resource-version",old_rv,"--dry-run=server")
+            code,after_delete_dry=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            code,still_current=req(tpl+"/probe",tokens["author"],ctx=tls)
+            if code!=200 or still_current["metadata"]["uid"]!=old_uid or len(after_delete_dry.get("items",[]))!=history_before_delete:
+                raise RuntimeError("datumctl delete dry-run changed the current object or history")
+            deleted=json.loads(datumctl("templates","delete","probe","--uid",old_uid,"--resource-version",old_rv))
+            if deleted.get("uid")!=old_uid or deleted.get("action")!="deleted":raise RuntimeError("datumctl delete summary lost the deleted UID")
+            gone_code,_=req(tpl+"/probe",tokens["author"],ctx=tls)
+            history_code,retained=req(prox+"/apptemplaterevisions",tokens["author"],ctx=tls)
+            old_history=json.loads(datumctl("templates","history","--uid",old_uid))
+            if gone_code!=404 or history_code!=200 or len(retained.get("items",[]))!=history_before_delete or old_history.get("templateUID")!=old_uid or len(old_history.get("revisions",[]))!=history_before_delete:
+                raise RuntimeError(f"datumctl delete/history mismatch (GET={gone_code}, list={history_code}, list items={len(retained.get('items',[]))}, CLI history items={len(old_history.get('revisions',[]))})")
+            code,replacement=req(tpl,tokens["author"],"POST",body,ctx=tls)
+            if code!=201 or replacement["metadata"]["uid"]==old_uid:raise RuntimeError("same-name template recreation did not get a fresh UID")
+            datumctl("templates","delete","probe","--uid",old_uid,"--resource-version",old_rv,expected=1,error_contains="changed or its name was reused")
+            code,recreated=req(tpl+"/probe",tokens["author"],ctx=tls)
+            if code!=200 or recreated["metadata"]["uid"]!=replacement["metadata"]["uid"]:
+                raise RuntimeError("stale delete after name reuse removed or changed the replacement")
+            old_history_again=json.loads(datumctl("templates","history","--uid",old_uid))
+            if len(old_history_again.get("revisions",[]))!=history_before_delete:
+                raise RuntimeError("same-name recreation obscured old UID history")
             for rev in hist["items"]:
                 if rev["spec"]["projectUID"]!=puids["apps-proof-a"] or rev["spec"]["effectiveActorUID"]!="author-uid":raise RuntimeError("actor/project attribution mismatch")
             code,_=req(prox.replace("apps-proof-a","apps-proof-b")+"/apptemplates/probe",tokens["author"],ctx=tls)
@@ -325,9 +410,9 @@ current-context: root
             if b"403" not in s.recv(512):raise RuntimeError("CONNECT proxy accepted unapproved host")
             s.close()
             if "evil.invalid:443" not in proxy.reject:raise RuntimeError("CONNECT negative control missing")
-            print("PASS: real APIService aggregation; verified Milo proxy certificate and Apps serving CA; live Project GET and SAR issued by scoped Apps root identity; actor UID and Project UID attribution; revision history and cross-Project isolation; denied aggregate request and separate real SAR denial; spoofed X-Remote headers ignored.")
-            print(f"Pins: Milo {MILO_PIN}; Apps {a.apps_source_sha}; CONNECT accepted {proxy.accept}, rejected {len(proxy.reject)}.")
-            print("Limit: local Milo RBAC harness only; no IAM/FGA, live deployment DNS, or production wrapper claim.")
+            print("PASS: real Milo APIService aggregation and exported datumctl Apps commands; history, diff, restore dry-run/commit, foreign-revision denial, UID/RV delete dry-run/commit, retained history by deleted UID, same-name recreation and stale-delete rejection; project isolation, Milo SAR, proxy TLS and spoofed-header controls.")
+            print(f"Pins: Milo {MILO_PIN}; Apps {a.apps_source_sha}; datumctl {a.datumctl_source_sha}; CONNECT accepted {proxy.accept}, rejected {len(proxy.reject)}.")
+            print("Limit: datumctl launcher invokes the exact exported command implementation but supplies test kubeconfig/project routing instead of OAuth login and the production root factory; local Milo RBAC only, no IAM/FGA or live deployment DNS proof.")
         finally:
             try:
                 if proxy:proxy.close()

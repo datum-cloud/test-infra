@@ -8,10 +8,13 @@ import sys
 import tempfile
 
 MILO_PIN = "ba4b06e8dde99dd70e9a2f34e011d635e4408a76"
-APPS_PIN = "19b331f6812bd94c93d7b09d8754f2016353ae87"
+APPS_PIN = "ccb6cedf6e5a8b29ec1ac74e1dfdaa5ff3db6f23"
+DATUMCTL_PIN = "28f4d364302a9df451b7a453cce1ce1cb99ce0a0"
 MILO_LAUNCHER = pathlib.Path(__file__).with_name("apps-aggregation-launcher") / "main.go"
+DATUMCTL_LAUNCHER = pathlib.Path(__file__).with_name("datumctl-apps-aggregation-launcher") / "main.go"
 HARNESS = pathlib.Path(__file__).with_name("test-apps-authoring-aggregation.py")
 MILO_ENTRY = pathlib.Path("cmd/milo/appsaggregationprobe/main.go")
+DATUMCTL_ENTRY = pathlib.Path("internal/cmd/appsaggregationprobe/main.go")
 
 
 def run(args, *, cwd=None, env=None, timeout=30, capture=True, check=True):
@@ -52,26 +55,39 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--milo-source", required=True, type=pathlib.Path)
     parser.add_argument("--apps-source", required=True, type=pathlib.Path)
+    parser.add_argument("--datumctl-source", required=True, type=pathlib.Path)
+    parser.add_argument("--datumctl-mod-cache", required=True, type=pathlib.Path)
     parser.add_argument("--etcd-binary", required=True, type=pathlib.Path)
     args = parser.parse_args()
     if not args.etcd_binary.is_file() or not os.access(args.etcd_binary, os.X_OK):
         raise RuntimeError("--etcd-binary must name an executable etcd binary")
     milo = check_source(args.milo_source, MILO_PIN)
     apps = check_source(args.apps_source, APPS_PIN)
+    datumctl = check_source(args.datumctl_source, DATUMCTL_PIN)
     launcher = MILO_LAUNCHER.read_bytes()
+    datumctl_launcher = DATUMCTL_LAUNCHER.read_bytes()
     tracked = run(["git", "-C", str(milo), "ls-files", "--error-unmatch", str(MILO_ENTRY)], check=False)
     if tracked.returncode == 0:
         raise RuntimeError("the pinned Milo checkout unexpectedly tracks the probe launcher path")
+    tracked = run(["git", "-C", str(datumctl), "ls-files", "--error-unmatch", str(DATUMCTL_ENTRY)], check=False)
+    if tracked.returncode == 0:
+        raise RuntimeError("the pinned datumctl checkout unexpectedly tracks the probe launcher path")
 
     # The only permitted Milo source-tree change is the harness launcher, and
     # these exact bytes are part of this test-infra revision.
     entry = milo / MILO_ENTRY
+    cli_entry = datumctl / DATUMCTL_ENTRY
     entry.parent.mkdir(parents=True, exist_ok=True)
     entry.write_bytes(launcher)
+    cli_entry.parent.mkdir(parents=True, exist_ok=True)
+    cli_entry.write_bytes(datumctl_launcher)
     try:
         status = run(["git", "-C", str(milo), "status", "--porcelain=v1", "--untracked-files=all"]).stdout.splitlines()
         if status != [f"?? {MILO_ENTRY.as_posix()}"] or entry.read_bytes() != launcher:
             raise RuntimeError("Milo source changed beyond the exact checked-in launcher addition")
+        status = run(["git", "-C", str(datumctl), "status", "--porcelain=v1", "--untracked-files=all"]).stdout.splitlines()
+        if status != [f"?? {DATUMCTL_ENTRY.as_posix()}"] or cli_entry.read_bytes() != datumctl_launcher:
+            raise RuntimeError("datumctl source changed beyond the exact checked-in launcher addition")
 
         with tempfile.TemporaryDirectory(prefix="apps-authoring-build-") as temp:
             out = pathlib.Path(temp)
@@ -80,22 +96,31 @@ def main():
             common_env["GOTOOLCHAIN"] = "local"
             milo_env = common_env.copy()
             milo_env["GOCACHE"] = str(out / "milo-cache")
-            milo_env["GOMODCACHE"] = str(out / "milo-modcache")
+            milo_env["GOMODCACHE"] = str(args.datumctl_mod_cache.resolve())
             apps_env = common_env.copy()
             apps_env["GOCACHE"] = str(out / "apps-cache")
             apps_env["GOMODCACHE"] = milo_env["GOMODCACHE"]
+            cli_env = common_env.copy()
+            cli_env["GOCACHE"] = str(out / "datumctl-cache")
+            cli_env["GOMODCACHE"] = str(args.datumctl_mod_cache.resolve())
+            cli_env["GOTOOLCHAIN"] = "auto"
             print(f"Milo source: {MILO_PIN}; only untracked addition is {MILO_ENTRY}", flush=True)
             print(f"Apps source: {APPS_PIN}; checkout clean", flush=True)
+            print(f"datumctl source: {DATUMCTL_PIN}; only untracked addition is {DATUMCTL_ENTRY}", flush=True)
             print("Building pinned Milo launcher and Apps apiserver (temporary caches)...", flush=True)
             run(["go", "build", "-buildvcs=true", "-o", str(milo_bin), "./cmd/milo/appsaggregationprobe"], cwd=milo, env=milo_env, timeout=600, capture=False)
             run(["go", "build", "-buildvcs=true", "-o", str(apps_bin), "./cmd/apps-apiserver"], cwd=apps, env=apps_env, timeout=600, capture=False)
+            cli_bin = out / "datumctl"
+            print("Building pinned datumctl Apps command launcher (pinned toolchain)...", flush=True)
+            run(["go", "build", "-buildvcs=true", "-o", str(cli_bin), "./internal/cmd/appsaggregationprobe"], cwd=datumctl, env=cli_env, timeout=600, capture=False)
             verify_build_info(milo_bin, MILO_PIN, True)
             verify_build_info(apps_bin, APPS_PIN, False)
+            verify_build_info(cli_bin, DATUMCTL_PIN, True)
             run([
                 sys.executable, str(HARNESS),
-                "--milo-binary", str(milo_bin), "--apps-binary", str(apps_bin),
+                "--milo-binary", str(milo_bin), "--apps-binary", str(apps_bin), "--datumctl-binary", str(cli_bin),
                 "--etcd-binary", str(args.etcd_binary.resolve()),
-                "--milo-source-sha", MILO_PIN, "--apps-source-sha", APPS_PIN,
+                "--milo-source-sha", MILO_PIN, "--apps-source-sha", APPS_PIN, "--datumctl-source-sha", DATUMCTL_PIN,
             ], timeout=150, capture=False)
     finally:
         # Restore the initially clean source tree, including when a build or
@@ -103,6 +128,9 @@ def main():
         if entry.is_file() and entry.read_bytes() == launcher:
             entry.unlink()
             entry.parent.rmdir()
+        if cli_entry.is_file() and cli_entry.read_bytes() == datumctl_launcher:
+            cli_entry.unlink()
+            cli_entry.parent.rmdir()
 
 
 if __name__ == "__main__":
