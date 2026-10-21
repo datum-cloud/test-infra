@@ -76,6 +76,89 @@ class CatalogAPIBootstrapTest(unittest.TestCase):
                     catalog.cleanup(host, milo, evidence, evidence_file)
                 proxy.assert_not_called()
 
+    def test_completed_graph_requires_source_bound_delete_intent_if_api_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = {"run_id": "c" * 24, "attempted": {
+                catalog.journal_key(row): "uid-" + str(index)
+                for index, row in enumerate(catalog.GRAPH)},
+                "complete": True, "scope_identity": {}}
+            host = mock.Mock()
+            host.optional.return_value = None
+            with mock.patch.object(catalog, "assert_no_catalog_dependents"), \
+                 mock.patch.object(catalog, "APIProxy") as proxy:
+                with self.assertRaisesRegex(RuntimeError, "source-bound delete intent"):
+                    catalog.cleanup(host, object(), evidence,
+                                    Path(directory) / "journal.json")
+                proxy.assert_not_called()
+
+    def test_original_api_delete_intent_recovers_absent_stage(self):
+        manifest = catalog.manifest_set()[2]
+        key = catalog.journal_key(catalog.GRAPH[2])
+        rendered = [{"apiVersion": "v1", "kind": "ConfigMap",
+                     "metadata": {"name": "unit-fixture", "namespace": "milo-system"}}]
+        contract = {"manifest": manifest, "rendered": rendered,
+                    "revision": "sha1:" + catalog.CATALOG_SHA}
+        owner = catalog.FluxOwned(object(), "milo-system",
+                                  "service-catalog-api-crds", rendered, contract["revision"])
+        initial = owner._capture(manifest, "c" * 24)
+        saved = {"version": 1, "run_id": "c" * 24, "initial": initial,
+                 "inventory": [list(row) for row in sorted(owner.allowed)],
+                 "revision": contract["revision"],
+                 "uid": "original-stage-uid", "intent": True,
+                 "delete_intent": True, "ca_bundle": None,
+                 "ca_committed": False}
+        evidence = {"run_id": "c" * 24,
+                    "attempted": {key: "original-stage-uid"},
+                    "flux_stages": {key: saved}}
+        catalog.original_api_delete_intent(object(), evidence, {key: contract})
+        altered = copy.deepcopy(evidence)
+        altered["flux_stages"][key]["delete_intent"] = False
+        with self.assertRaisesRegex(RuntimeError, "source-bound delete intent"):
+            catalog.original_api_delete_intent(object(), altered, {key: contract})
+        altered = copy.deepcopy(evidence)
+        altered["flux_stages"][key]["uid"] = "replacement"
+        with self.assertRaisesRegex(RuntimeError, "source-bound delete intent"):
+            catalog.original_api_delete_intent(object(), altered, {key: contract})
+        changed = copy.deepcopy(contract)
+        changed["manifest"]["spec"]["sourceRef"]["name"] = "foreign"
+        with self.assertRaisesRegex(RuntimeError, "source-bound delete intent"):
+            catalog.original_api_delete_intent(object(), evidence, {key: changed})
+
+    def test_changed_oci_tombstone_cannot_authorize_graph_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = {"run_id": "c" * 24, "attempted": {
+                catalog.journal_key(row): "uid-" + str(index)
+                for index, row in enumerate(catalog.GRAPH)},
+                "complete": True, "scope_identity": {}}
+            tombstone = Path(directory) / "transition.json"
+            tombstone.write_text(json.dumps({
+                "phase": "cleaned", "cleanup": "complete", "graph_run_id": "c" * 24,
+                "stage_uid": "replaced-stage", "original_git_uid": "uid-0",
+                "scope_identity": {}, "oci_digest": catalog.OCI_DIGEST}))
+            tombstone.chmod(0o600)
+            host = mock.Mock()
+            host.optional.return_value = None
+            with mock.patch.object(catalog, "assert_no_catalog_dependents"), \
+                 mock.patch.object(catalog, "APIProxy") as proxy:
+                with self.assertRaisesRegex(RuntimeError, "tombstone"):
+                    catalog.cleanup(host, object(), evidence,
+                                    Path(directory) / "journal.json",
+                                    catalog_oci_evidence_file=tombstone)
+                proxy.assert_not_called()
+
+    def test_live_oci_source_blocks_original_graph_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = {"run_id": "c" * 24, "attempted": {},
+                        "complete": False, "scope_identity": {}}
+            host = mock.Mock()
+            host.optional.return_value = {"metadata": {"uid": "oci-live"}}
+            with mock.patch.object(catalog, "assert_no_catalog_dependents"), \
+                 mock.patch.object(catalog, "APIProxy") as proxy:
+                with self.assertRaisesRegex(RuntimeError, "Catalog OCI source"):
+                    catalog.cleanup(host, object(), evidence,
+                                    Path(directory) / "journal.json")
+                proxy.assert_not_called()
+
     def test_missing_full_flux_journal_retains_sources_without_delete(self):
         with tempfile.TemporaryDirectory() as directory:
             evidence_file = Path(directory) / "journal.json"
@@ -83,7 +166,7 @@ class CatalogAPIBootstrapTest(unittest.TestCase):
                 catalog.journal_key(row): "uid-" + str(index)
                 for index, row in enumerate(catalog.GRAPH)}, "complete": False}
             host = mock.Mock()
-            host.optional.side_effect = lambda kind, name, namespace=None: None if kind == "namespace" else {
+            host.optional.side_effect = lambda kind, name, namespace=None: None if kind in ("namespace", "ocirepository") else {
                 "metadata": {"uid": evidence["attempted"][namespace + "/" + name],
                              "resourceVersion": "9"}}
             milo = mock.Mock()

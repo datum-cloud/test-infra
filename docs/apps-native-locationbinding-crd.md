@@ -57,6 +57,10 @@ python3 hack/bootstrap-apps-native-locationbinding-crd.py \
   --milo-port 43443 \
   --installer-evidence-file /private/tmp/apps-native-vz-projects3-20261021/catalog-installer-attempt2-evidence.json \
   --catalog-api-evidence-file /private/tmp/apps-native-vz-projects3-20261021/catalog-api-evidence.json \
+  --catalog-source /tmp/apps-service-catalog-source-20261021 \
+  --catalog-oci-manifest /tmp/apps-catalog-oci-inspect-20261021/manifest.json \
+  --catalog-oci-layer /tmp/apps-catalog-oci-inspect-20261021/content.tar.gz \
+  --catalog-oci-evidence-file /private/tmp/apps-native-vz-projects3-20261021/catalog-oci-transition-evidence.json \
   --locations-evidence-file /private/tmp/apps-native-vz-projects3-20261021/locations-evidence.json \
   --evidence-file /private/tmp/apps-native-vz-projects3-20261021/locationbinding-crd-evidence.json
 ```

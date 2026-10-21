@@ -8,6 +8,7 @@ bounded cleanup. It installs no operator, entitlement, or customer workload.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import io
 import json
@@ -22,9 +23,11 @@ import time
 
 import yaml
 
-from apps_native_support import APIProxy, Commands, Kube, RUN_LABEL, private_file, ready, require, wait_for
+from apps_native_support import APIProxy, Commands, FluxOwned, Kube, RUN_LABEL, private_file, ready, require, wait_for
 from apps_native_operator_flux import create_stage, delete_stage
 from apps_native_fixture_scope import active_catalog_installer, scope_identity, require_same_identity
+from apps_native_catalog_prune import assert_no_catalog_dependents
+from apps_native_catalog_oci import OCI_DIGEST, SOURCE_NAME
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -183,10 +186,20 @@ def intent_digest(manifest: dict) -> str:
     meta = manifest.get("metadata", {})
     require(not meta.get("ownerReferences") and not meta.get("finalizers") and
             not meta.get("deletionTimestamp"), "Catalog create intent has lifecycle metadata")
+    annotations = dict(meta.get("annotations", {}))
+    if manifest.get("kind") in ("GitRepository", "OCIRepository"):
+        requested = annotations.pop("reconcile.fluxcd.io/requestedAt", None)
+        require(requested is None or isinstance(requested, str) and len(requested) <= 128,
+                "Catalog source reconcile annotation is malformed")
+    spec = copy.deepcopy(manifest.get("spec", {}))
+    if manifest.get("kind") in ("GitRepository", "OCIRepository"):
+        spec.setdefault("timeout", "60s")
+    if manifest.get("kind") == "OCIRepository":
+        spec.setdefault("provider", "generic")
     projection = {"apiVersion": manifest.get("apiVersion"), "kind": manifest.get("kind"),
                   "name": meta.get("name"), "namespace": meta.get("namespace"),
-                  "labels": meta.get("labels", {}), "annotations": meta.get("annotations", {}),
-                  "spec": manifest.get("spec", {})}
+                  "labels": meta.get("labels", {}), "annotations": annotations,
+                  "spec": spec}
     return hashlib.sha256(json.dumps(projection, sort_keys=True,
                                      separators=(",", ":")).encode()).hexdigest()
 
@@ -266,7 +279,9 @@ def delete_recorded(host: Kube, proxy: APIProxy, row: tuple[str, str, str, str, 
     meta = obj["metadata"]
     expected = evidence["attempted"][key]
     if expected:
-        require(meta["uid"] == expected, f"refusing replaced {key}")
+        require(meta["uid"] == expected and
+                intent_digest(obj) == evidence.get("intents", {}).get(key),
+                f"refusing replaced or changed {key}")
     else:
         require(meta.get("labels", {}).get(RUN_LABEL) == evidence["run_id"] and
                 intent_digest(obj) == evidence.get("intents", {}).get(key),
@@ -282,49 +297,51 @@ def delete_recorded(host: Kube, proxy: APIProxy, row: tuple[str, str, str, str, 
     wait_for(absent, f"{key} deleted", 120)
 
 
+def original_api_delete_intent(host: Kube, evidence: dict, flux_contracts) -> None:
+    """Recognize only this graph's source-bound in-flight original API prune."""
+    key = journal_key(GRAPH[2])
+    contract = (flux_contracts or {}).get(key)
+    saved = evidence.get("flux_stages", {}).get(key)
+    require(isinstance(contract, dict) and set(contract) == {"manifest", "rendered", "revision"} and
+            contract["manifest"] == manifest_set()[2] and
+            contract["revision"] == "sha1:" + CATALOG_SHA and
+            isinstance(saved, dict) and saved.get("uid") ==
+                evidence.get("attempted", {}).get(key) and
+            saved.get("delete_intent") is True,
+            "absent original Catalog API stage lacks source-bound delete intent")
+    owner = FluxOwned(host, "milo-system", "service-catalog-api-crds",
+                      contract["rendered"], contract["revision"])
+    owner.recover(contract["manifest"], evidence["run_id"], saved)
+
+
 def cleanup(host: Kube, milo: Kube, evidence: dict, path: Path,
-            locations_evidence_file: Path | None = None, flux_contracts=None) -> None:
+            locations_evidence_file: Path | None = None, flux_contracts=None,
+            catalog_oci_evidence_file: Path | None = None) -> None:
     attempted = evidence.get("attempted", {})
     require(set(attempted).issubset({journal_key(row) for row in GRAPH}) and
             all(uid is None or isinstance(uid, str) and bool(uid)
                 for uid in attempted.values()), "invalid Catalog cleanup journal")
-    # These checks apply even after a partially applied Flux graph. A partial
-    # source-owned CRD install can already hold data, and pruning it deletes
-    # that data. Retain the graph and journal if any census is ambiguous.
-    require(host.optional("namespace", "services-system") is None,
-            "Catalog operator namespace services-system still exists")
-    locations_namespace = host.optional("namespace", "locations-system")
-    if locations_namespace is not None:
-        require(locations_evidence_file is not None and
-                not locations_evidence_file.is_symlink(),
-                "retained Locations namespace requires its private ownership journal")
-        private_file(locations_evidence_file)
-        locations = json.loads(locations_evidence_file.read_text())
-        require(locations.get("cleanup") == "complete-with-retained-namespace" and
-                locations.get("scope_identity") == evidence["scope_identity"] and
-                locations.get("retained_namespace") == {
-                    "name": "locations-system",
-                    "uid": locations_namespace["metadata"].get("uid")} and
-                locations_namespace["metadata"].get("labels", {}).get(RUN_LABEL) ==
-                    locations.get("run_id") and
-                not locations_namespace["metadata"].get("deletionTimestamp"),
-                "retained Locations namespace identity or cleanup differs")
-        census = host.json("-n", "locations-system", "get",
-            "deployments,statefulsets,daemonsets,replicasets,replicationcontrollers,pods,jobs,cronjobs")
-        require(isinstance(census, dict) and isinstance(census.get("items"), list) and
-                not census["items"], "retained Locations namespace workload census is unavailable or nonempty")
-    require(milo.json("get", "projects.resourcemanager.miloapis.com")["items"] == [],
-            "remove owned Projects before pruning their Catalog APIs")
-    crds, _ = root_inventory(milo)
-    for crd_name in sorted(crds):
-        require(milo.json("get", crd_name, "-A")["items"] == [],
-                f"Catalog API {crd_name} still contains data")
-    for kind, name in WEBHOOKS:
-        obj = milo.optional(kind, name)
-        if obj is not None:
-            require(all(not hook.get("clientConfig", {}).get("caBundle")
-                        for hook in obj.get("webhooks", [])),
-                    f"{kind}/{name} still has an operator CA bundle")
+    assert_no_catalog_dependents(host, milo, evidence.get("scope_identity"),
+                                 locations_evidence_file)
+    require(host.optional("ocirepository", SOURCE_NAME, "flux-system") is None,
+            "prune the task-owned Catalog OCI source before original graph cleanup")
+    if (evidence.get("complete") is True and
+            host.optional("kustomization", "service-catalog-api-crds", "milo-system") is None):
+        if catalog_oci_evidence_file is None:
+            original_api_delete_intent(host, evidence, flux_contracts)
+        else:
+            require(not catalog_oci_evidence_file.is_symlink(),
+                    "absent owned Catalog API stage requires exact OCI prune tombstone")
+            private_file(catalog_oci_evidence_file)
+            transition = json.loads(catalog_oci_evidence_file.read_text())
+            require(transition.get("phase") == "cleaned" and
+                    transition.get("cleanup") == "complete" and
+                    transition.get("graph_run_id") == evidence.get("run_id") and
+                    transition.get("stage_uid") == attempted.get(journal_key(GRAPH[2])) and
+                    transition.get("original_git_uid") == attempted.get(journal_key(GRAPH[0])) and
+                    transition.get("scope_identity") == evidence.get("scope_identity") and
+                    transition.get("oci_digest") == OCI_DIGEST,
+                    "Catalog OCI prune tombstone differs from owned graph")
     proxy = APIProxy(host, path.parent, "catalog-crd-cleanup")
     errors: list[str] = []
     try:
@@ -367,6 +384,7 @@ def main() -> None:
     parser.add_argument("--evidence-file", required=True, type=Path)
     parser.add_argument("--installer-evidence-file", required=True, type=Path)
     parser.add_argument("--locations-evidence-file", type=Path)
+    parser.add_argument("--catalog-oci-evidence-file", type=Path)
     parser.add_argument("--deadline-seconds", type=int, default=600)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
@@ -402,7 +420,8 @@ def main() -> None:
                 "Catalog cleanup evidence differs from task-owned scope")
         require_same_identity(evidence["scope_identity"], identity)
         cleanup(host, milo, evidence, args.evidence_file,
-                args.locations_evidence_file, flux_contracts)
+                args.locations_evidence_file, flux_contracts,
+                args.catalog_oci_evidence_file)
         print("Catalog API graph cleanup complete", flush=True)
         return
     manifests = manifest_set()
@@ -435,7 +454,8 @@ def main() -> None:
         commands.deadline = time.monotonic() + 300
         try:
             cleanup(host, milo, evidence, args.evidence_file,
-                    args.locations_evidence_file, flux_contracts)
+                    args.locations_evidence_file, flux_contracts,
+                    args.catalog_oci_evidence_file)
         except Exception:
             print("Catalog API graph cleanup incomplete; private journal retained", file=sys.stderr)
         raise RuntimeError("Catalog API graph setup failed; inspect sanitized evidence") from None
