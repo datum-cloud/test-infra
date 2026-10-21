@@ -7,11 +7,14 @@ on:
       - Taskfile.yml
       - components/apps-native-kata/**
       - components/apps-native-kata-netns/**
+      - components/apps-native-kata-runtimeclass-project/**
       - docs/apps-native-kata-prerequisite.md
       - docs/apps-kata-netns-followup.md
       - hack/check_native_kata_prerequisite.py
       - hack/render_kata_netns_candidate.py
       - hack/test_kata_netns_candidate.py
+      - hack/render_runtimeclass_project_candidate.py
+      - hack/test_runtimeclass_project_candidate.py
       - hack/test_native_kata_prerequisite.py
       - components/apps-native/**
       - hack/apps_native_support.py
@@ -34,11 +37,14 @@ on:
       - Taskfile.yml
       - components/apps-native-kata/**
       - components/apps-native-kata-netns/**
+      - components/apps-native-kata-runtimeclass-project/**
       - docs/apps-native-kata-prerequisite.md
       - docs/apps-kata-netns-followup.md
       - hack/check_native_kata_prerequisite.py
       - hack/render_kata_netns_candidate.py
       - hack/test_kata_netns_candidate.py
+      - hack/render_runtimeclass_project_candidate.py
+      - hack/test_runtimeclass_project_candidate.py
       - hack/test_native_kata_prerequisite.py
       - components/apps-native/**
       - hack/apps_native_support.py
