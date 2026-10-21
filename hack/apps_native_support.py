@@ -207,17 +207,28 @@ class APIProxy:
         finally:
             conn.close()
 
-    def get(self, path: str) -> dict:
-        conn = UnixHTTPConnection(self.path)
-        try:
-            conn.request("GET", path)
-            response = conn.getresponse()
-            raw = response.read(65537)
-            require(response.status == 200 and len(raw) <= 65536,
-                    f"private API GET returned HTTP {response.status} or oversized body")
-            return json.loads(raw)
-        finally:
-            conn.close()
+    def get(self, path: str, retry_seconds: float = 60) -> dict:
+        # Milo may rate-limit Project API discovery briefly after a new CRD
+        # appears. Retry only 429 on read-only GET; every other response and
+        # an oversized body still fails closed.
+        deadline = time.monotonic() + retry_seconds
+        if self.kube.commands.deadline is not None:
+            deadline = min(deadline, self.kube.commands.deadline)
+        while True:
+            conn = UnixHTTPConnection(self.path)
+            try:
+                conn.request("GET", path)
+                response = conn.getresponse()
+                raw = response.read(65537)
+                status = response.status
+            finally:
+                conn.close()
+            require(len(raw) <= 65536, "private API GET returned oversized body")
+            if status == 200:
+                return json.loads(raw)
+            if status != 429 or time.monotonic() >= deadline:
+                raise RuntimeError(f"private API GET returned HTTP {status}")
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
 
     def close(self) -> None:
         if self.process is None:

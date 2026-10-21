@@ -739,6 +739,15 @@ def check_crds(milo: Kube, source: dict) -> dict[str, str]:
     return schema_hashes
 
 
+def wait_exact_crds(milo: Kube, source: dict, seconds: float = 120) -> dict[str, str]:
+    # The reviewed fixture restarts Milo after adding scoped static identities.
+    # An external localhost port-forward may briefly reconnect across that
+    # rollout even after the host Deployment reports Ready. Keep the schema
+    # assertion exact and bound only this read-only observation.
+    return wait_for(lambda: check_crds(milo, source),
+                    "Milo root CRDs Established with exact source schemas", seconds)
+
+
 def project_path(project: str, resource: str, name: str = "") -> str:
     result = f"{PROJECT_API}/{project}/control-plane{APPS_API}/{resource}"
     return result + ("/" + quote(name, safe="") if name else "")
@@ -1495,7 +1504,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
                        "kustomizations", "/apis/kustomize.toolkit.fluxcd.io/v1")
         flux_reconcile(host, "kustomization", FLUX_CRDS, "milo-system", 300)
         exact_flux(host, FLUX_CRDS, "milo-system", digest)
-        evidence["observed_crd_schema_sha256"] = check_crds(milo, source)
+        evidence["observed_crd_schema_sha256"] = wait_exact_crds(milo, source)
         state["crds_installed"] = True
         for project in state["projects"]:
             require(not resource_empty(milo_proxy, project, "apptemplates") and
