@@ -6,6 +6,12 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - hack/apps_native_fixture_scope.py
+      - hack/bootstrap-apps-native-catalog-installer.py
+      - hack/test_apps_native_fixture_scope.py
+      - hack/test_bootstrap_apps_native_catalog_installer.py
+      - components/service-catalog/installer-rbac.yaml
+      - docs/apps-native-catalog-installer.md
       - hack/apps_native_support.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
@@ -22,6 +28,12 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - hack/apps_native_fixture_scope.py
+      - hack/bootstrap-apps-native-catalog-installer.py
+      - hack/test_apps_native_fixture_scope.py
+      - hack/test_bootstrap_apps_native_catalog_installer.py
+      - components/service-catalog/installer-rbac.yaml
+      - docs/apps-native-catalog-installer.md
       - hack/apps_native_support.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
