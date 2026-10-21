@@ -1,0 +1,28 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: compute-a1t-dfw-cell
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  dependsOn:
+    - name: compute-a1t-management
+  sourceRef:
+    kind: GitRepository
+    name: compute-a1t-controller
+  path: ./config/overlays/cell
+  kubeConfig:
+    secretRef:
+      name: apps-a1t-dfw-member-kubeconfig
+      key: kubeconfig
+  images:
+    - name: ghcr.io/datum-cloud/compute
+      digest: sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: compute-manager
+      namespace: compute-system
