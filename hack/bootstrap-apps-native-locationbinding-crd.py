@@ -208,6 +208,8 @@ def live_dependencies(host: Kube, milo: Kube, identity: dict, installer_path: Pa
     require(not transition_path.is_symlink(), "Catalog OCI transition journal symlink refused")
     private_file(transition_path)
     transition = json.loads(transition_path.read_text())
+    require(transition.get("locations_run_id") == locations.get("run_id"),
+            "Catalog OCI transition does not bind the retained Locations run")
     verified_live_transition(host, identity, oci_contract, catalog_api, transition)
     billing_source = host.json("-n", "flux-system", "get", "ocirepository", "catalog-billing")
     billing_api = host.json("-n", "milo-system", "get", "kustomization",

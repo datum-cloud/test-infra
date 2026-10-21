@@ -4,6 +4,7 @@ import copy
 import base64
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import stat
 import tempfile
@@ -20,6 +21,52 @@ spec.loader.exec_module(fixture)
 
 
 class RenderContractTests(unittest.TestCase):
+    def test_predecessor_transition_requires_same_locations_run(self):
+        identity = {"fixture": "owned"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            private = root / "apps-a1t-locations-private"
+            private.mkdir(mode=0o700)
+            installer_path = root / "installer.json"
+            locations_path = root / "locations.json"
+            catalog_path = root / "catalog.json"
+            transition_path = root / "transition.json"
+            rows = {
+                locations_path: {"source": fixture.LOCATIONS_SHA,
+                                 "cleanup": "not-requested", "setup_stage": "ready",
+                                 "scope_identity": identity, "run_id": "a" * 24,
+                                 "installer_run_id": "b" * 24},
+                private / "state.json": {"run_id": "a" * 24,
+                                          "auth_intent": True,
+                                          "old_b64": "catalog-csv",
+                                          "new_b64": "locations-csv"},
+                catalog_path: {"complete": True, "cleanup": "not-requested",
+                               "catalog_source": fixture.CATALOG_SHA,
+                               "billing_digest": fixture.BILLING_DIGEST,
+                               "scope_identity": identity,
+                               "installer_run_id": "b" * 24},
+                transition_path: {"locations_run_id": "c" * 24},
+            }
+            for path, row in rows.items():
+                path.write_text(json.dumps(row))
+                path.chmod(0o600)
+            with mock.patch.object(fixture, "active_catalog_installer",
+                                   return_value=({"run_id": "b" * 24},
+                                                 {"new_b64": "catalog-csv"})), \
+                 mock.patch.object(fixture, "verified_live_transition") as verified:
+                with self.assertRaisesRegex(RuntimeError, "does not bind"):
+                    fixture.live_dependencies(object(), object(), identity,
+                        installer_path, catalog_path, locations_path,
+                        transition_path, {})
+                verified.assert_not_called()
+                transition_path.write_text(json.dumps({"locations_run_id": "a" * 24}))
+                verified.side_effect = RuntimeError("reached verified predecessor")
+                with self.assertRaisesRegex(RuntimeError, "reached verified predecessor"):
+                    fixture.live_dependencies(object(), object(), identity,
+                        installer_path, catalog_path, locations_path,
+                        transition_path, {})
+
     def test_clean_revision_requires_valid_signature(self):
         class Git:
             def __init__(self, reject=False):
