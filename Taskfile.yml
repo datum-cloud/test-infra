@@ -495,6 +495,17 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_ci_capacity.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_forward_milo_reconnecting.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack/apps_native_cli -p 'test_*.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_kata_runtime_smoke.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_kata_runtime_smoke.py' -v
+      - task validate-apps-native-kata-runtime-smoke
+
+  validate-apps-native-kata-runtime-smoke:
+    desc: "Render member-local Kata Flux resources and strictly validate both against pinned Flux CRD schemas"
+    cmds:
+      - test -s {{.TASKFILE_DIR}}/hack/check_apps_native_kata_runtime_smoke.py
+      - >-
+        PYTHONDONTWRITEBYTECODE=1 python3 hack/check_apps_native_kata_runtime_smoke.py
+        --component-only
 
   validate-apps-native-kata-artifacts:
     desc: "Render and strictly validate the pinned Kata provider and chart artifacts"

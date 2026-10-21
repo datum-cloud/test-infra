@@ -1,0 +1,19 @@
+{
+  "hostNode": "kindest/node@sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027",
+  "kataChart": "quay.io/kata-containers/kata-deploy-charts/kata-deploy@sha256:33f102f6db70083de4fc8238af4439c4245a601bcb6a72e49bc80529098aefc0",
+  "kataInstallerImage": "quay.io/kata-containers/kata-deploy@sha256:f6009f18a602fc3b7a5439c5c3674b9dc083bb4a7ff78b4fbb0bb8c9e0b55b5f",
+  "kataInstallerArm64Manifest": "sha256:85d4f55b0e8eeb945225c18e05bf0654090f91faff471be4346eea875f17773e",
+  "kataInstallerArm64Config": "sha256:9f034254e6addac8f4ef5ca02c25b548aeef668cea6417d73f63a470ebd89ccc",
+  "kataKubectlImage": "quay.io/kata-containers/kubectl@sha256:8180a25f399ba17de1dbcdf79d2760fcf25a95ec66d5500a0553ce5dab67b82b",
+  "kataKubectlArm64Manifest": "sha256:0e272865cdf6b381364f58ce74a6e2ac0fddfc5625e8f384fcd4e4a3da8b0a1b",
+  "kataKubectlArm64Config": "sha256:e86b5075b2538abf8b1e0ae3e361f9bcecc224fb2c255c570de5d3a31a4d5a8f",
+  "kataChartVersion": "4.1.0",
+  "smokeImage": "docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662",
+  "smokeImageArm64Manifest": "sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05",
+  "smokeImageArm64Config": "sha256:b7c873bd97bdc9046fc894e0b216c8aef31e0db4c5b761fb53022e40577ab6c0",
+  "smokeImageSource": "https://github.com/docker-library/busybox",
+  "smokeImageRevision": "b6ab7c14ba46700181395f420545aee1ab297934",
+  "smokeImageVersion": "1.36.1-glibc",
+  "runtimeHandler": "kata-qemu",
+  "runtimeClass": "kata-qemu"
+}
