@@ -125,3 +125,11 @@ adopting a resource. The task-owned Namespace deletion destroys only this
 trial's etcd PVC and authoring history after checks complete. A private
 `/tmp/apps-a1t-authoring-evidence-*.json` report records pins, non-secret
 checks, result and cleanup state. It never contains tokens or private keys.
+
+The lead independently reran the final fixture twice. The second run records
+explicit phase timing in [its evidence](evidence/apps-authoring-prerequisite-lead-2026-10-20.json):
+40.532 seconds for the trial and 27.372 seconds for cleanup
+(67.904 seconds total, excluding read-only preflight).
+Both runs passed the full object/history equality and cleanup assertions.
+The timed run consumed OCI artifact `sha256:4b53b2fb21e88b627ce6a057bcdad6667de7237c940aee8bbabf0fad8430daa3`.
+The earlier transient post-rollout 503 did not recur in these runs.

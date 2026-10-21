@@ -945,6 +945,8 @@ def check_authoring(args, private, snapshot, tokens, evidence, record):
 
 
 def execute(args, private, snapshot):
+    trial_started = time.monotonic()
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     global GLOBAL_DEADLINE
     run_id = "apps-authoring-" + secrets.token_hex(8)
     tokens = {AUTHORITY: secrets.token_urlsafe(48), AUTHOR: secrets.token_urlsafe(48)}
@@ -964,7 +966,7 @@ def execute(args, private, snapshot):
                                                   suffix=".json")
     os.close(evidence_fd)
     evidence_path = Path(evidence_name)
-    evidence = {"run_id": run_id, "source_revision": REVISION,
+    evidence = {"run_id": run_id, "started_at": started_at, "source_revision": REVISION,
                 "source_config_sha256": snapshot["config_hash"],
                 "source_config_file_count": snapshot["config_file_count"],
                 "apps_image": APPS_IMAGE,
@@ -1109,6 +1111,8 @@ def execute(args, private, snapshot):
         record("real Milo authoring/history/isolation; two new API pod UIDs retain history")
         succeeded = True
     finally:
+        cleanup_started = time.monotonic()
+        evidence["test_duration_seconds"] = round(cleanup_started - trial_started, 3)
         # Retain a separate bounded cleanup window even if the test deadline expires.
         GLOBAL_DEADLINE = time.monotonic() + 300
         try:
@@ -1184,6 +1188,9 @@ def execute(args, private, snapshot):
                     proxy.close()
                 except Exception as exc:
                     errors.append(f"{name} private API proxy close: {exc}")
+            evidence["cleanup_duration_seconds"] = round(time.monotonic() - cleanup_started, 3)
+            evidence["total_duration_seconds"] = round(time.monotonic() - trial_started, 3)
+            evidence["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             evidence["cleanup"] = "complete" if not errors else "incomplete: " + "; ".join(errors)
             evidence["result"] = "pass" if succeeded and not errors else "fail"
             private_write(evidence_path, json.dumps(evidence, indent=2) + "\n")
