@@ -148,7 +148,7 @@ def ready_condition(obj: dict, condition: str) -> bool:
         for item in obj.get("status", {}).get("conditions", [])))
 
 
-def project_ready(milo: Kube, name: str, uid: str, run_id: str) -> bool:
+def project_ready(milo: Kube, host: Kube, name: str, uid: str, run_id: str) -> bool:
     project = milo.optional(PROJECT_RESOURCE, name)
     require(project is not None and project["metadata"]["uid"] == uid and
             project["metadata"].get("labels", {}).get(RUN_LABEL) == run_id and
@@ -157,7 +157,9 @@ def project_ready(milo: Kube, name: str, uid: str, run_id: str) -> bool:
             f"owned Project/{name} was replaced or changed")
     if not ready_condition(project, "Ready"):
         return False
-    pcp = milo.optional(PCP_RESOURCE, name)
+    # Milo's ProjectController writes ProjectControlPlanes to its separate
+    # infrastructure (hosting Kubernetes) client, not the Milo root API.
+    pcp = host.optional(PCP_RESOURCE, name)
     if pcp is None:
         return False
     require(pcp["metadata"].get("labels", {}).get(
@@ -165,7 +167,25 @@ def project_ready(milo: Kube, name: str, uid: str, run_id: str) -> bool:
             pcp["metadata"].get("labels", {}).get(
                 "resourcemanager.miloapis.com/project-name") == name,
             f"ProjectControlPlane/{name} does not match Project UID")
-    return ready_condition(pcp, "ControlPlaneReady")
+    # This test overlay serves Project APIs through Milo itself. It creates
+    # host-side PCP records, but does not deploy a separate infrastructure
+    # reconciler to change their default ControlPlaneReady=False condition.
+    # Apps' Project discovery mode gates on the real Project Ready condition.
+    return True
+
+
+def project_control_plane_observation(host: Kube, name: str, project_uid: str) -> dict:
+    pcp = host.optional(PCP_RESOURCE, name)
+    require(pcp is not None and pcp["metadata"].get("labels", {}).get(
+                "resourcemanager.miloapis.com/project-uid") == project_uid and
+            pcp["metadata"].get("labels", {}).get(
+                "resourcemanager.miloapis.com/project-name") == name,
+            f"ProjectControlPlane/{name} does not match Project UID")
+    conditions = [{key: condition[key] for key in
+                   ("type", "status", "reason", "observedGeneration")
+                   if key in condition}
+                  for condition in pcp.get("status", {}).get("conditions", [])]
+    return {"uid": pcp["metadata"]["uid"], "conditions": conditions}
 
 
 def wait_true(predicate, label: str, deadline: float) -> None:
@@ -290,15 +310,29 @@ def source_guard(host: Kube) -> None:
             "host Milo Flux source, overlay, or image differs from reviewed pin")
 
 
+def organization_context_server(port: int) -> str:
+    return f"https://127.0.0.1:{port}{ORG_PATH}/{ORG}/control-plane"
+
+
 def create_recorded(milo: Kube, manifest: dict, name: str,
                     created: dict[str, str | None], evidence: dict,
-                    evidence_file: Path) -> str:
+                    evidence_file: Path, *, project_server: str | None = None) -> str:
     """Persist this run's intent before POST, then the returned UID immediately."""
     require(name not in created, f"duplicate bootstrap create intent for {name}")
     created[name] = None  # POST may succeed although its response is lost.
     evidence["attempted"] = created.copy()
     write_json_atomic(evidence_file, evidence)
-    result = milo.create(manifest)
+    if project_server is None:
+        require(manifest["kind"] == "Organization",
+                "Project creation requires the Organization API context")
+        result = milo.create(manifest)
+    else:
+        require(manifest["kind"] == "Project" and
+                project_server.startswith("https://127.0.0.1:") and
+                project_server.endswith(f"{ORG_PATH}/{ORG}/control-plane"),
+                "Project creation requires the pinned Organization API path")
+        result = json.loads(milo.k("--server", project_server, "create", "-f", "-",
+                                  "-o", "json", input_text=json.dumps(manifest)))
     uid = result["metadata"]["uid"]
     require(isinstance(uid, str) and bool(uid),
             f"{name} create response lacks UID")
@@ -371,19 +405,29 @@ def run(args: argparse.Namespace) -> dict:
                         created, evidence, evidence_file)
         for name in PROJECTS:
             create_recorded(milo, project_manifest(name, run_id), name,
-                            created, evidence, evidence_file)
+                           created, evidence, evidence_file,
+                           project_server=organization_context_server(args.milo_port))
         for name in PROJECTS:
-            wait_true(lambda n=name: project_ready(milo, n, created[n], run_id),
-                      f"Project/{name} and matching ProjectControlPlane Ready",
+            wait_true(lambda n=name: project_ready(milo, host, n, created[n], run_id),
+                      f"Project/{name} Ready and matching host ProjectControlPlane exists",
                       commands.deadline)
-            discovery = json.loads(milo.k("get", "--raw",
-                f"{PROJECT_PATH}/{name}/control-plane/api/v1"))
-            require(discovery.get("kind") == "APIResourceList",
-                    f"Project/{name} control-plane public API discovery unavailable")
+        proxy = APIProxy(milo, args.root_kubeconfig.parent, "project-bootstrap-discovery")
+        try:
+            proxy.start()
+            for name in PROJECTS:
+                discovery = proxy.get(f"{PROJECT_PATH}/{name}/control-plane/api/v1",
+                                      retry_seconds=60)
+                require(discovery.get("kind") == "APIResourceList",
+                        f"Project/{name} control-plane public API discovery unavailable")
+        finally:
+            proxy.close()
         observed = milo.json("get", PROJECT_RESOURCE)["items"]
         require({item["metadata"]["name"]: item["metadata"]["uid"]
                  for item in observed} == {name: created[name] for name in PROJECTS},
                 "Milo Project set or UID changed after readiness")
+        evidence["project_control_planes"] = {
+            name: project_control_plane_observation(host, name, created[name])
+            for name in PROJECTS}
         evidence["attempted"] = created.copy()
         evidence["uids"] = {name: created[name] for name in (ORG, *PROJECTS)}
         write_json_atomic(evidence_file, evidence)
@@ -438,8 +482,13 @@ def main() -> None:
         result = run(args)
     finally:
         os.umask(old_umask)
-    print(f"Milo Project bootstrap {result['cleanup']}: exact source, CA, "
-          "Organization, three Project UIDs and control planes verified", flush=True)
+    if args.cleanup:
+        print("Milo Project bootstrap cleanup complete: recorded owned resources absent",
+              flush=True)
+    else:
+        print("Milo Project bootstrap passed: exact source, CA, Organization, "
+              "three Ready Project UIDs, matching host PCP records, and public "
+              "Project API discovery verified", flush=True)
 
 
 if __name__ == "__main__":

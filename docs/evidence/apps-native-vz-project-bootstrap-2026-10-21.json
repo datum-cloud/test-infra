@@ -1,0 +1,163 @@
+{
+  "date": "2026-10-21",
+  "test_infra_base_revision": "3595e10d965b9ba759f92375fa4511b485f0c2ae",
+  "bootstrap_helper_sha256": "c0614305854f7cb39d6d4da395567fd8d99f0bca9fe4c6e142d9f04225a8e05c",
+  "host_bootstrap_script_sha256": "954adb2f0593b6a3858372c934579e30fd346865510ad1b7fd635cb5645be80c",
+  "profile": "apps-native-vz-20261021",
+  "profile_type": "vz",
+  "nested_virtualization": true,
+  "kvm_api_version": 12,
+  "kind_cluster": "apps-a1t-ci-vz-20261021",
+  "kind_node_index": "sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027",
+  "milo_source": "ba4b06e8dde99dd70e9a2f34e011d635e4408a76",
+  "milo_metrics_source": "0bb44b7ed38b37bf5266596f135a50947baf03e1",
+  "baseline_result": "Flux, cert-manager CSI, Kyverno, Gateway and Milo source-owned stages Ready; authenticated Gateway API HTTP 200",
+  "attempts": [
+    {
+      "result": "fail",
+      "failure": "Project POST at Milo root denied: missing Organization parent context",
+      "evidence": {
+        "host_context": "kind-apps-a1t-ci-vz-20261021",
+        "milo_source": "ba4b06e8dde99dd70e9a2f34e011d635e4408a76",
+        "organization": "apps-a1t-ci-org",
+        "projects": [
+          "apps-a1t-provider",
+          "apps-a1t-consumer-a",
+          "apps-a1t-consumer-b"
+        ],
+        "run_id": "f573a66f29e1029bef089342",
+        "attempted": {
+          "apps-a1t-ci-org": "4f04bd23-d17d-42b5-b902-c834cea3e5e6",
+          "apps-a1t-provider": null
+        },
+        "uids": {
+          "apps-a1t-ci-org": "4f04bd23-d17d-42b5-b902-c834cea3e5e6"
+        },
+        "cleanup": "complete",
+        "cleanup_errors": []
+      }
+    },
+    {
+      "result": "fail",
+      "failure": "ProjectControlPlane queried from Milo root, where its CRD is not served",
+      "evidence": {
+        "host_context": "kind-apps-a1t-ci-vz-20261021",
+        "milo_source": "ba4b06e8dde99dd70e9a2f34e011d635e4408a76",
+        "organization": "apps-a1t-ci-org",
+        "projects": [
+          "apps-a1t-provider",
+          "apps-a1t-consumer-a",
+          "apps-a1t-consumer-b"
+        ],
+        "run_id": "8fb501ef7022fcd5ed6a9f96",
+        "attempted": {
+          "apps-a1t-ci-org": "3552dbe7-8bd1-46ff-9b4f-d9ac7f513860",
+          "apps-a1t-provider": "062435e6-90a0-460d-af2a-bdab1ec7ff21",
+          "apps-a1t-consumer-a": "0473839e-6e15-4702-b1f3-b83bfd71f5a6",
+          "apps-a1t-consumer-b": "896fb1ad-577e-4942-8c79-30fde4dc2728"
+        },
+        "uids": {
+          "apps-a1t-ci-org": "3552dbe7-8bd1-46ff-9b4f-d9ac7f513860",
+          "apps-a1t-provider": "062435e6-90a0-460d-af2a-bdab1ec7ff21",
+          "apps-a1t-consumer-a": "0473839e-6e15-4702-b1f3-b83bfd71f5a6",
+          "apps-a1t-consumer-b": "896fb1ad-577e-4942-8c79-30fde4dc2728"
+        },
+        "cleanup": "complete",
+        "cleanup_errors": []
+      }
+    },
+    {
+      "result": "stopped",
+      "failure": "Observed host PCP ControlPlaneReady=False/Creating; stopped stale status wait, then ran recorded UID/RV cleanup",
+      "evidence": {
+        "host_context": "kind-apps-a1t-ci-vz-20261021",
+        "milo_source": "ba4b06e8dde99dd70e9a2f34e011d635e4408a76",
+        "organization": "apps-a1t-ci-org",
+        "projects": [
+          "apps-a1t-provider",
+          "apps-a1t-consumer-a",
+          "apps-a1t-consumer-b"
+        ],
+        "run_id": "747f2ce0567f9325824a3d03",
+        "attempted": {
+          "apps-a1t-ci-org": "6dfc2d5a-ffff-4922-94db-f7ff1706ee35",
+          "apps-a1t-provider": "ad9cd5c3-ec20-4208-8723-26c2fa8c65c1",
+          "apps-a1t-consumer-a": "22802795-7b1b-4d49-b44b-81078febc57e",
+          "apps-a1t-consumer-b": "92d6b235-1a62-4025-a217-e4e216474ff8"
+        },
+        "uids": {
+          "apps-a1t-ci-org": "6dfc2d5a-ffff-4922-94db-f7ff1706ee35",
+          "apps-a1t-provider": "ad9cd5c3-ec20-4208-8723-26c2fa8c65c1",
+          "apps-a1t-consumer-a": "22802795-7b1b-4d49-b44b-81078febc57e",
+          "apps-a1t-consumer-b": "92d6b235-1a62-4025-a217-e4e216474ff8"
+        },
+        "cleanup": "complete",
+        "cleanup_errors": []
+      }
+    },
+    {
+      "result": "pass",
+      "failure": null,
+      "evidence": {
+        "host_context": "kind-apps-a1t-ci-vz-20261021",
+        "milo_source": "ba4b06e8dde99dd70e9a2f34e011d635e4408a76",
+        "organization": "apps-a1t-ci-org",
+        "projects": [
+          "apps-a1t-provider",
+          "apps-a1t-consumer-a",
+          "apps-a1t-consumer-b"
+        ],
+        "run_id": "8749e957eb7fc3be98951d30",
+        "attempted": {
+          "apps-a1t-ci-org": "747103b4-8d28-4554-bc38-9bdb8f321ee5",
+          "apps-a1t-provider": "8c40029b-b2b9-4ca6-b4fc-ee0b3ab4ef7d",
+          "apps-a1t-consumer-a": "17d547f4-1a3a-4bb2-88c3-2a5cae05b8de",
+          "apps-a1t-consumer-b": "9cd8a069-7196-409d-b133-98c9730f58cc"
+        },
+        "uids": {
+          "apps-a1t-ci-org": "747103b4-8d28-4554-bc38-9bdb8f321ee5",
+          "apps-a1t-provider": "8c40029b-b2b9-4ca6-b4fc-ee0b3ab4ef7d",
+          "apps-a1t-consumer-a": "17d547f4-1a3a-4bb2-88c3-2a5cae05b8de",
+          "apps-a1t-consumer-b": "9cd8a069-7196-409d-b133-98c9730f58cc"
+        },
+        "cleanup": "not-requested",
+        "project_control_planes": {
+          "apps-a1t-provider": {
+            "uid": "b4b0f348-ecfd-49f4-bdf1-57273dcce424",
+            "conditions": [
+              {
+                "type": "ControlPlaneReady",
+                "status": "False",
+                "reason": "Creating"
+              }
+            ]
+          },
+          "apps-a1t-consumer-a": {
+            "uid": "91fff15e-49a3-4565-b512-9f370689a660",
+            "conditions": [
+              {
+                "type": "ControlPlaneReady",
+                "status": "False",
+                "reason": "Creating"
+              }
+            ]
+          },
+          "apps-a1t-consumer-b": {
+            "uid": "93b879a0-3b7d-49b5-8c31-09ddfb3e40bb",
+            "conditions": [
+              {
+                "type": "ControlPlaneReady",
+                "status": "False",
+                "reason": "Creating"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "limits": [
+    "PCP ControlPlaneReady remains False/Creating; no infrastructure reconciler in test overlay",
+    "No Workload, Instance, route or Apps installation was created"
+  ]
+}
