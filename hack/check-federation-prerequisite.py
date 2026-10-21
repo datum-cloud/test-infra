@@ -24,6 +24,8 @@ KARMADA_DEPLOYMENTS = {
     "karmada-scheduler",
     "karmada-webhook",
 }
+PINNED_IMAGE_IDS = set(json.loads(
+    (Path(__file__).resolve().parents[1] / "components/federation/image-lock.json").read_text()))
 DEADLINE = time.monotonic() + 180
 
 
@@ -84,6 +86,8 @@ def main() -> None:
     require(args.source.is_absolute() and args.source.is_dir(), "explicit absolute PR32 checkout required")
     require(run("git", "-C", str(args.source), "rev-parse", "HEAD") == SOURCE_SHA,
             "federation source HEAD differs from pinned PR32 commit")
+    require(not run("git", "-C", str(args.source), "status", "--porcelain",
+                    "--untracked-files=all"), "pinned PR32 source checkout has local changes")
     require(args.chart.is_absolute() and args.chart.is_file(), "explicit absolute chart archive required")
     require(hashlib.sha256(args.chart.read_bytes()).hexdigest() == CHART_SHA256,
             "Karmada chart archive digest differs from observed v1.16.0 archive")
@@ -130,6 +134,18 @@ def main() -> None:
     require(any(item["name"] == "karmada" and item["chart"] == "karmada-v1.16.0"
                 and item["status"] == "deployed" for item in releases),
             "Karmada v1.16.0 Helm release is not deployed")
+    pods = kjson(args.hub_kubeconfig, "get", "pods", "-n", "karmada-system")["items"]
+    actual_images = {
+        status["imageID"]
+        for pod in pods
+        for status in (pod.get("status", {}).get("containerStatuses", [])
+                       + pod.get("status", {}).get("initContainerStatuses", []))
+        if status.get("imageID")
+    }
+    require(actual_images == PINNED_IMAGE_IDS,
+            f"Karmada runtime image IDs differ from the nine pinned OCI digests: "
+            f"missing={sorted(PINNED_IMAGE_IDS - actual_images)}, "
+            f"unexpected={sorted(actual_images - PINNED_IMAGE_IDS)}")
 
     cluster = kjson(args.karmada_kubeconfig, "get", "cluster", args.member_name)
     labels = cluster["metadata"].get("labels", {})
@@ -143,7 +159,8 @@ def main() -> None:
                 for c in cluster.get("status", {}).get("conditions", [])),
             "Karmada member is not Ready")
     print(f"Federation prerequisite passed: PR32 {SOURCE_SHA}, chart archive sha256:{CHART_SHA256}")
-    print(f"Karmada v1.16.0: {len(KARMADA_DEPLOYMENTS)} deployments and etcd Ready; "
+    print(f"Karmada v1.16.0: {len(KARMADA_DEPLOYMENTS)} deployments, etcd, "
+          f"{len(actual_images)} pinned image IDs Ready; "
           f"{args.member_name} Ready at {member_ip}, canonical DFW labels present")
     print("This check does not assert native Compute/NSO/Apps Workload or route readiness.")
 
