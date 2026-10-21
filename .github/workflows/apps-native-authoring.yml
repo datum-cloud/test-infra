@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   native-authoring:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.APPS_NATIVE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 75
     env:
       CLUSTER_NAME: apps-a1t-ci-${{ github.run_id }}-${{ github.run_attempt }}
@@ -68,6 +68,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
+
+      - name: Verify existing runner capacity before cluster creation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C test-infra rev-parse HEAD)" == "$TEST_INFRA_SHA" ]]
+          PYTHONDONTWRITEBYTECODE=1 python3 test-infra/hack/check-apps-native-ci-capacity.py
+
       - uses: arduino/setup-task@v3.0.0
         with:
           version: 3.53.1
@@ -135,6 +143,8 @@ jobs:
           flux --version
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
             -s test-infra/hack -p 'test_bootstrap_apps_native_projects.py' -q
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_apps_native_ci_capacity.py' -q
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
             -s test-infra/hack -p 'test_apps_native_harness.py' -q
           python3 test-infra/hack/test-apps-native-authoring.py \
