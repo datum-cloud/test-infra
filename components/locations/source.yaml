@@ -1,0 +1,10 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: apps-a1t-locations
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/milo-os/locations.git
+  ref:
+    commit: 507ac2cbd48c0228f09baea64199882eca91e865

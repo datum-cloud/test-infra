@@ -1,0 +1,21 @@
+# Local Kustomize render patches only; never a remote Flux stage.
+- target:
+    group: rbac.authorization.k8s.io
+    version: v1
+    kind: ClusterRole
+    name: locations-manager
+  patch: "- op: replace\n  path: /rules\n  value:\n    - apiGroups: [\"\"]\n     \
+    \ resources: [events]\n      verbs: [create, patch]\n    - apiGroups: [locations.miloapis.com]\n\
+    \      resources: [locationclasses]\n      verbs: [get, list, watch, patch, update]\n\
+    \    - apiGroups: [locations.miloapis.com]\n      resources: [locationclasses/finalizers]\n\
+    \      verbs: [update]\n    - apiGroups: [locations.miloapis.com]\n      resources:\
+    \ [locationclasses/status, locations/status]\n      verbs: [get, patch, update]\n\
+    \    - apiGroups: [locations.miloapis.com]\n      resources: [locations]\n   \
+    \   verbs: [get, list, watch]"
+- target:
+    group: rbac.authorization.k8s.io
+    version: v1
+    kind: ClusterRoleBinding
+    name: locations-manager
+  patch: "- op: replace\n  path: /subjects\n  value:\n    - apiGroup: rbac.authorization.k8s.io\n\
+    \      kind: User\n      name: apps-a1t-locations-operator"

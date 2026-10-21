@@ -7,6 +7,7 @@ import unittest
 import yaml
 
 from test_bootstrap_apps_native_catalog_crds import catalog
+from test_bootstrap_apps_native_locations import locations
 from test_apps_native_flux_prune import NativeAPI
 
 
@@ -17,6 +18,9 @@ class OperatorFluxTests(unittest.TestCase):
             row = catalog.GRAPH[index]
             yield catalog, row, manifests[index], catalog.journal_key(row), (
                 "sha1:" + catalog.CATALOG_SHA if index == 2 else catalog.BILLING_DIGEST)
+        for index, file in ((4, "host.yaml"),):
+            row = locations.ROWS[index]
+            yield locations, row, yaml.safe_load((locations.ROOT / "components/locations" / file).read_text()), row[0], "sha1:" + locations.LOCATIONS_SHA
 
     def create(self, module, api, row, manifest, evidence, path, contracts):
         if module is catalog:
@@ -33,7 +37,7 @@ class OperatorFluxTests(unittest.TestCase):
         return {key: {"manifest": manifest, "revision": revision, "rendered": [
             {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fixture", "namespace": "fixture"}}]}}
 
-    def test_both_catalog_stages_recover_lost_reply_only_with_durable_exact_intent(self):
+    def test_all_three_stages_recover_lost_reply_only_with_durable_exact_intent(self):
         for module, row, manifest, key, revision in self.cases():
             for lost in (False, True):
                 with self.subTest(stage=key, lost=lost), tempfile.TemporaryDirectory() as d:
@@ -122,7 +126,7 @@ class OperatorFluxTests(unittest.TestCase):
         offline = yaml.safe_load((root / ".github/workflows/apps-native-offline.yml").read_text())
         events = offline.get("on", offline.get(True))
         for event in ("pull_request", "push"):
-            self.assertLessEqual({"components/service-catalog/api-crds.yaml", "components/service-catalog/billing-crds.yaml",
+            self.assertLessEqual({"components/locations/**", "components/service-catalog/api-crds.yaml", "components/service-catalog/billing-crds.yaml",
                 "hack/apps_native_operator_flux.py", "hack/test_apps_native_operator_flux.py"},
                 set(events[event]["paths"]))
 

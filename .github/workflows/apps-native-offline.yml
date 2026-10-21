@@ -6,6 +6,11 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - components/locations/**
+      - hack/bootstrap-apps-native-locations.py
+      - hack/test_bootstrap_apps_native_locations.py
+      - hack/test_apps_native_locations_rbac.py
+      - docs/apps-native-location-catalog-prerequisite.md
       - hack/bootstrap-apps-native-catalog-crds.py
       - hack/apps_native_operator_flux.py
       - hack/test_bootstrap_apps_native_catalog_crds.py
@@ -35,6 +40,11 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - components/locations/**
+      - hack/bootstrap-apps-native-locations.py
+      - hack/test_bootstrap_apps_native_locations.py
+      - hack/test_apps_native_locations_rbac.py
+      - docs/apps-native-location-catalog-prerequisite.md
       - hack/bootstrap-apps-native-catalog-crds.py
       - hack/apps_native_operator_flux.py
       - hack/test_bootstrap_apps_native_catalog_crds.py
