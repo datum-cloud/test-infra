@@ -1,0 +1,28 @@
+{
+  "kata": {
+    "version": "4.1.0",
+    "sourceRevision": "ddcb1ad8d23cbb4323f86c209f132b89592902df",
+    "arm64GoShimAsset": "kata-go-static-4.1.0-arm64.tar.zst",
+    "arm64StaticAsset": "kata-static-4.1.0-arm64.tar.zst",
+    "deployChartVersion": "4.1.0"
+  },
+  "compute": {
+    "sourceRevision": "88a7101c2b91f7195c2bb5433c50f54c384a90ce",
+    "imageIndex": "sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679"
+  },
+  "kataProvider": {
+    "sourceRevision": "9578d304201428f6d7370460b4a6e9933ef1b25f",
+    "imageIndex": "sha256:b51a24d99d97bb77ee94cea74a1313fcfd70c2caff98f2ad136f30d74369001c"
+  },
+  "networkServicesOperator": {
+    "sourceRevision": "79245f00d6220c128df3d024475ff7b1566ce305",
+    "imageIndex": "sha256:cfdd8e44e4a7d06a5fb2982ee922cf6b2c8f1e251788d9f79f514a0bbe40e6f7",
+    "bundle": "ghcr.io/datum-cloud/network-services-operator-kustomize@sha256:5f96f60f1ccbe94791545bb1ccf5b3798e56a83b986d74d885986f76e89ee9c2"
+  },
+  "galactic": {
+    "moduleVersion": "v0.5.8-0.20261016143526-45d3c3514bec",
+    "sourceRevision": "45d3c3514bec321333c3d88cba0bdc9f6c0f6594",
+    "cniImageIndex": "sha256:a6443f85c2f423d0e492def5adb9fc67b785674c4e10b60b22ef462f12dc537b",
+    "cniArm64": "sha256:505d2a34ecadec202e9288aaf07191f65961328cbc3bb824b34917bb98700b60"
+  }
+}
