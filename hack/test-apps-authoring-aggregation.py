@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Local real Milo-to-Apps API aggregation test. RBAC only; not IAM/FGA proof."""
-import argparse, base64, datetime, http.client, json, os, pathlib, signal, socket, ssl
+import argparse, base64, datetime, http.client, json, os, pathlib, re, signal, socket, ssl
 import subprocess, sys, tempfile, threading, time, urllib.error, urllib.request, uuid
 
 MILO_PIN = "ba4b06e8dde99dd70e9a2f34e011d635e4408a76"
@@ -146,11 +146,11 @@ def main():
     p.add_argument("--milo-binary",required=True,type=pathlib.Path); p.add_argument("--apps-binary",required=True,type=pathlib.Path); p.add_argument("--datumctl-binary",required=True,type=pathlib.Path); p.add_argument("--etcd-binary",required=True,type=pathlib.Path)
     p.add_argument("--milo-source-sha",required=True); p.add_argument("--apps-source-sha",required=True); p.add_argument("--datumctl-source-sha",required=True)
     a=p.parse_args()
-    if a.milo_source_sha!=MILO_PIN or a.apps_source_sha!=APPS_PIN or a.datumctl_source_sha!=DATUMCTL_PIN:raise SystemExit("pinned source mismatch")
+    if a.milo_source_sha!=MILO_PIN or re.fullmatch(r"[0-9a-f]{40}",a.apps_source_sha) is None or a.datumctl_source_sha!=DATUMCTL_PIN:raise SystemExit("pinned source mismatch")
     # Source cleanliness is established by the build helper; Go build metadata
     # is an additional consistency check, not source provenance by itself.
     verify_binary(a.milo_binary,MILO_PIN,True)
-    verify_binary(a.apps_binary,APPS_PIN,False)
+    verify_binary(a.apps_binary,a.apps_source_sha,False)
     verify_binary(a.datumctl_binary,DATUMCTL_PIN,True)
     with tempfile.TemporaryDirectory(prefix="apps-aggregation-") as td:
         d=pathlib.Path(td); os.chmod(d,0o700)

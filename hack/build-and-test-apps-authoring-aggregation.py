@@ -3,6 +3,7 @@
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -55,14 +56,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--milo-source", required=True, type=pathlib.Path)
     parser.add_argument("--apps-source", required=True, type=pathlib.Path)
+    parser.add_argument("--apps-source-sha", default=APPS_PIN, help="Exact Apps commit; CI uses its caller commit")
     parser.add_argument("--datumctl-source", required=True, type=pathlib.Path)
     parser.add_argument("--datumctl-mod-cache", required=True, type=pathlib.Path)
     parser.add_argument("--etcd-binary", required=True, type=pathlib.Path)
     args = parser.parse_args()
+    if re.fullmatch(r"[0-9a-f]{40}", args.apps_source_sha) is None:
+        raise RuntimeError("--apps-source-sha must be an exact lowercase 40-hex Git commit")
     if not args.etcd_binary.is_file() or not os.access(args.etcd_binary, os.X_OK):
         raise RuntimeError("--etcd-binary must name an executable etcd binary")
     milo = check_source(args.milo_source, MILO_PIN)
-    apps = check_source(args.apps_source, APPS_PIN)
+    apps = check_source(args.apps_source, args.apps_source_sha)
     datumctl = check_source(args.datumctl_source, DATUMCTL_PIN)
     launcher = MILO_LAUNCHER.read_bytes()
     datumctl_launcher = DATUMCTL_LAUNCHER.read_bytes()
@@ -77,11 +81,14 @@ def main():
     # these exact bytes are part of this test-infra revision.
     entry = milo / MILO_ENTRY
     cli_entry = datumctl / DATUMCTL_ENTRY
-    entry.parent.mkdir(parents=True, exist_ok=True)
-    entry.write_bytes(launcher)
-    cli_entry.parent.mkdir(parents=True, exist_ok=True)
-    cli_entry.write_bytes(datumctl_launcher)
+    # Even ignored files/directories must not be overwritten or removed.
+    if entry.parent.exists() or cli_entry.parent.exists():
+        raise RuntimeError("probe launcher directories must be absent before the run")
     try:
+        entry.parent.mkdir()
+        entry.write_bytes(launcher)
+        cli_entry.parent.mkdir()
+        cli_entry.write_bytes(datumctl_launcher)
         status = run(["git", "-C", str(milo), "status", "--porcelain=v1", "--untracked-files=all"]).stdout.splitlines()
         if status != [f"?? {MILO_ENTRY.as_posix()}"] or entry.read_bytes() != launcher:
             raise RuntimeError("Milo source changed beyond the exact checked-in launcher addition")
@@ -105,7 +112,7 @@ def main():
             cli_env["GOMODCACHE"] = str(args.datumctl_mod_cache.resolve())
             cli_env["GOTOOLCHAIN"] = "auto"
             print(f"Milo source: {MILO_PIN}; only untracked addition is {MILO_ENTRY}", flush=True)
-            print(f"Apps source: {APPS_PIN}; checkout clean", flush=True)
+            print(f"Apps source: {args.apps_source_sha}; checkout clean", flush=True)
             print(f"datumctl source: {DATUMCTL_PIN}; only untracked addition is {DATUMCTL_ENTRY}", flush=True)
             print("Building pinned Milo launcher and Apps apiserver (temporary caches)...", flush=True)
             run(["go", "build", "-buildvcs=true", "-o", str(milo_bin), "./cmd/milo/appsaggregationprobe"], cwd=milo, env=milo_env, timeout=600, capture=False)
@@ -114,13 +121,13 @@ def main():
             print("Building pinned datumctl Apps command launcher (pinned toolchain)...", flush=True)
             run(["go", "build", "-buildvcs=true", "-o", str(cli_bin), "./internal/cmd/appsaggregationprobe"], cwd=datumctl, env=cli_env, timeout=600, capture=False)
             verify_build_info(milo_bin, MILO_PIN, True)
-            verify_build_info(apps_bin, APPS_PIN, False)
+            verify_build_info(apps_bin, args.apps_source_sha, False)
             verify_build_info(cli_bin, DATUMCTL_PIN, True)
             run([
                 sys.executable, str(HARNESS),
                 "--milo-binary", str(milo_bin), "--apps-binary", str(apps_bin), "--datumctl-binary", str(cli_bin),
                 "--etcd-binary", str(args.etcd_binary.resolve()),
-                "--milo-source-sha", MILO_PIN, "--apps-source-sha", APPS_PIN, "--datumctl-source-sha", DATUMCTL_PIN,
+                "--milo-source-sha", MILO_PIN, "--apps-source-sha", args.apps_source_sha, "--datumctl-source-sha", DATUMCTL_PIN,
             ], timeout=150, capture=False)
     finally:
         # Restore the initially clean source tree, including when a build or

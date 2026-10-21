@@ -111,3 +111,28 @@ random temporary directory and tokens, keeps sensitive inputs mode-restricted,
 does not print bearer tokens or full audit records, gives the entire run a
 120-second alarm, bounds subprocess/TLS operations, closes tunnel sockets, and
 shuts down the processes on exit.
+
+## Automated caller verification
+
+The reusable `apps-aggregation.yml` workflow is owned here in test-infra and
+called from the Apps repository. The caller pins this runner to an exact
+commit and supplies its own exact GitHub event commit. The workflow checks
+that commit matches the event, checks out private Apps using the caller's
+read-only repository token, and disables persisted checkout credentials.
+Milo and datumctl remain fixed to the documented commits. The public runner
+repository needs no new cross-repository credential.
+
+The build helper's optional `--apps-source-sha` accepts only a full lowercase
+40-hex commit. It still requires exact clean source, compiles the real server,
+and verifies binary revision and clean build metadata. Omitting the option
+retains the documented local fixture pin. The harness checks the supplied
+commit against the binary; a version string alone never replaces clean-source
+verification. Existing or ignored launcher directories are rejected rather
+than overwritten.
+
+CI uploads the assertion log, runner revision and clean-source checks, but
+not temporary credentials, audit logs or private keys. Its real loopback
+Milo/etcd/Apps proof has the same limitations as the local run: it does not
+replace the separate Flux/native-traffic environment, production IAM or the
+full datumctl OAuth flow. A declared workflow is not passing evidence until
+its exact caller run succeeds.

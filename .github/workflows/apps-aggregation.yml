@@ -1,0 +1,98 @@
+name: Apps authoring aggregation
+on:
+  workflow_call:
+    inputs:
+      runner-revision:
+        description: Exact test-infra commit containing this workflow and its runner
+        required: true
+        type: string
+      apps-revision:
+        description: Exact Apps caller commit to verify
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  aggregation:
+    if: github.repository == 'datum-labs/apps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUNNER_REVISION: ${{ inputs.runner-revision }}
+      APPS_REVISION: ${{ inputs.apps-revision }}
+    steps:
+      - name: Require immutable source revisions
+        shell: bash
+        run: |
+          echo "GOMODCACHE=$RUNNER_TEMP/apps-modules" >> "$GITHUB_ENV"
+          [[ "$RUNNER_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APPS_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APPS_REVISION" == "$GITHUB_SHA" ]]
+      - uses: actions/checkout@v6
+        with:
+          repository: datum-cloud/test-infra
+          ref: ${{ inputs.runner-revision }}
+          path: test-infra
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.apps-revision }}
+          path: apps
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: milo-os/milo
+          ref: ba4b06e8dde99dd70e9a2f34e011d635e4408a76
+          path: milo
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: datum-cloud/datumctl
+          ref: 28f4d364302a9df451b7a453cce1ce1cb99ce0a0
+          path: datumctl
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/go.mod
+          cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned real etcd assets
+        shell: bash
+        run: |
+          assets=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305142021-f9589b9f2b9d use 1.33.0 -p path)
+          echo "KUBEBUILDER_ASSETS=$assets" >> "$GITHUB_ENV"
+      - name: Verify exact caller through real Milo and datumctl
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p diagnostics
+          git -C test-infra rev-parse HEAD > diagnostics/runner-revision.txt
+          test "$(cat diagnostics/runner-revision.txt)" = "$RUNNER_REVISION"
+          python test-infra/hack/build-and-test-apps-authoring-aggregation.py \
+            --milo-source "$GITHUB_WORKSPACE/milo" \
+            --apps-source "$GITHUB_WORKSPACE/apps" \
+            --apps-source-sha "$APPS_REVISION" \
+            --datumctl-source "$GITHUB_WORKSPACE/datumctl" \
+            --datumctl-mod-cache "$GOMODCACHE" \
+            --etcd-binary "$KUBEBUILDER_ASSETS/etcd" \
+            2>&1 | tee diagnostics/aggregation.log
+      - name: Verify source cleanup
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p diagnostics
+          for source in apps milo datumctl; do
+            if test -d "$source/.git"; then
+              git -C "$source" status --porcelain=v1 --untracked-files=all > "diagnostics/$source-cleanup.txt"
+              test ! -s "diagnostics/$source-cleanup.txt"
+            fi
+          done
+      - name: Upload nonsecret proof and cleanup results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apps-authoring-aggregation
+          path: diagnostics/
+          if-no-files-found: error
