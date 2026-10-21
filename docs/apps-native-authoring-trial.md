@@ -200,3 +200,43 @@ The first offline invocation used a short SHA and was rejected before cluster
 access; the corrected full-SHA check and first live attempt passed.
 All nineteen offline regressions pass. This proves normal deployed authoring
 with the new public provider timeout, not full outage isolation or installation.
+
+## Fresh-cluster reusable CI bootstrap
+
+The reusable `apps-native-authoring.yml` workflow belongs to test-infra. An
+Apps-owned caller pins its exact test-infra SHA and supplies its own clean
+Apps commit and verified image evidence. The caller token reads the private
+Apps repository; no token is stored in a source artifact. The workflow verifies
+both caller pins before starting a uniquely named Kind cluster, then stages
+Milo through the existing pinned Flux baseline and creates one Organization
+and exactly three Projects through normal API calls.
+
+`bootstrap-apps-native-projects.py` accepts only that CI context and fixed
+resource set. It verifies Milo source/image and public serving CA, and writes
+its host-only bootstrap credential to an exclusive mode-0600 kubeconfig under
+a mode-0700 directory. It refuses existing Projects. Project UID, owner,
+observed Ready generation, matching control-plane UID label and discovery must
+all pass before native authoring. The bootstrap token is never mounted in a Pod.
+
+The helper saves create intent before every API write and saves each returned
+UID. An interrupted create can be recovered only from the exact run label and
+resource shape. Cleanup uses UID/resource-version preconditions and retains
+the Organization if any Project cleanup fails. Native cleanup must finish
+before Project removal. The outer job tracks its own Kind creation intent and
+node container identity, captures sanitized evidence, and deletes that cluster.
+It refuses a colliding cluster or changed node identity.
+
+Lead and independent review found no remaining actionable fixture issue after
+fixing partial-create recovery and durable intent. Ten bootstrap failure tests
+plus nineteen existing offline regressions pass. Workflow lint passes. These
+are offline results; fresh-cluster TLS, bootstrap, image loading and runner
+capacity remain unproven until a real CI run completes. Customer installation,
+production IAM and full G4 remain disabled/unpassed.
+
+The CI helper installs exact Linux amd64 Kind 0.30.0, kubectl 1.32.0,
+Kustomize 5.8.1 and Flux 2.8.2 from official release assets, verifies their
+recorded SHA-256 hashes, and checks actual versions. Task is pinned to 3.53.1.
+The helper's comments record checksum sources. Kind uses the verified v1.32.0
+multi-platform node index `sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027`.
+The standard private runner's actual memory and disk are logged; no larger
+runner capacity or successful Linux execution is assumed from local allocation.
