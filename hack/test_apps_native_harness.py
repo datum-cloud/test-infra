@@ -204,6 +204,7 @@ class CLIIntegrationGatesTest(unittest.TestCase):
         argv = ["native-trial", "--apps-source", "/tmp/fixture-apps",
                 "--apps-revision", "a" * 40,
                 "--datumctl-source", "/tmp/fixture-datumctl",
+                "--image-evidence", "/tmp/fixture-image.json",
                 "--host-kubeconfig", "/tmp/host", "--host-context", "owned",
                 "--milo-kubeconfig", "/tmp/milo"]
         with (mock.patch.object(sys, "argv", argv),
@@ -211,6 +212,7 @@ class CLIIntegrationGatesTest(unittest.TestCase):
               mock.patch.object(trial, "fixture_contract"),
               mock.patch.object(trial, "source_role_guards"),
               mock.patch.object(trial, "source_contract", return_value={}),
+              mock.patch.object(trial, "image_contract"),
               mock.patch.object(trial, "build_private_cli",
                                 side_effect=RuntimeError("injected pin mismatch")) as build,
               mock.patch.object(trial, "preflight") as preflight):
@@ -234,6 +236,55 @@ class CLIIntegrationGatesTest(unittest.TestCase):
                                           lambda _: None, cli=object())
         delete.assert_called_once()
         request.assert_not_called()
+
+
+class PlatformPinTest(unittest.TestCase):
+    def test_exact_multiarch_evidence_rejects_changed_amd64_digest(self):
+        def platform(architecture):
+            manifest, config = trial.PLATFORM_DIGESTS[architecture]
+            return {"platform": {"os": "linux", "architecture": architecture},
+                    "manifest": manifest, "config": config,
+                    "revision": trial.APPS_BINARY_SHA,
+                    "source": "https://github.com/datum-labs/apps",
+                    "user": "65532:65532", "entrypoint": ["/apps-controller"]}
+        evidence = {"image": trial.APPS_IMAGE,
+                    "platforms": [platform("amd64"), platform("arm64")]}
+        with tempfile.TemporaryDirectory() as temporary:
+            file = Path(temporary) / "image.json"
+            file.write_text(json.dumps(evidence))
+            trial.image_contract(file)
+            evidence["platforms"][0]["config"] = "sha256:" + "0" * 64
+            file.write_text(json.dumps(evidence))
+            with self.assertRaisesRegex(RuntimeError, "amd64 manifest/config"):
+                trial.image_contract(file)
+
+    def test_node_architecture_and_running_image_match_selected_platform(self):
+        node = {"status": {"nodeInfo": {"architecture": "amd64",
+                                           "operatingSystem": "linux"},
+                           "images": [{"names": [trial.APPS_IMAGE]}]}}
+        self.assertEqual(trial.node_images([node], "amd64"), {trial.APPS_IMAGE})
+        with self.assertRaisesRegex(RuntimeError, "Linux/arm64"):
+            trial.node_images([node], "arm64")
+
+        class Host:
+            def __init__(self, image_id):
+                self.image_id = image_id
+
+            def json(self, *args):
+                if args[1] == "deployment":
+                    return {"metadata": {"uid": "deployment-uid"},
+                            "spec": {"replicas": 2},
+                            "status": {"availableReplicas": 2}}
+                return {"items": [{"metadata": {"uid": f"pod-{i}"},
+                                   "status": {"phase": "Running", "conditions": [
+                                       {"type": "Ready", "status": "True"}],
+                                       "containerStatuses": [{"ready": True,
+                                                              "imageID": self.image_id}]}}
+                                  for i in (1, 2)]}
+
+        trial.pod_snapshot(Host("docker://" + trial.AMD_CONFIG), "amd64")
+        with self.assertRaisesRegex(RuntimeError, "amd64 manifest/config"):
+            trial.pod_snapshot(Host("docker://" + trial.ARM_CONFIG), "amd64")
 
 
 if __name__ == "__main__":
