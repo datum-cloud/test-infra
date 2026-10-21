@@ -24,6 +24,11 @@ from urllib.parse import quote
 
 import yaml
 
+# Importing the two local helpers must not create untracked .pyc files before
+# signed_revision checks the exact checkout. Also protects a later cleanup run
+# that invokes the script without a PYTHONDONTWRITEBYTECODE environment.
+sys.dont_write_bytecode = True
+
 from apps_native_fixture_scope import (PROJECTS, require_same_identity,
                                        scope_identity)
 from apps_native_support import (APIProxy, Commands, Kube, RUN_LABEL,

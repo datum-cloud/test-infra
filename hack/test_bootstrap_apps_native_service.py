@@ -2,7 +2,10 @@
 
 import copy
 import importlib.util
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -60,6 +63,21 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("/projects/apps-a1t-consumer-a/control-plane/",
                       fixture.PATHS["entitlement"])
         self.assertNotIn("apps-a1t-consumer-b", fixture.PATHS["entitlement"])
+
+    def test_normal_python_invocation_does_not_dirty_signed_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("bootstrap-apps-native-service.py",
+                         "apps_native_fixture_scope.py", "apps_native_support.py"):
+                shutil.copy2(HACK / name, root / name)
+            environment = os.environ.copy()
+            environment.pop("PYTHONDONTWRITEBYTECODE", None)
+            result = subprocess.run([sys.executable, str(root /
+                "bootstrap-apps-native-service.py"), "--help"],
+                env=environment, capture_output=True, text=True,
+                check=False, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr[:200])
+            self.assertFalse(list(root.glob("**/__pycache__/**")))
 
     def test_native_finalizers_are_source_exact(self):
         for key, value in (("service", "services.miloapis.com/service"),
