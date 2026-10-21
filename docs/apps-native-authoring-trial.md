@@ -238,11 +238,31 @@ Kustomize 5.8.1 and Flux 2.8.2 from official release assets, verifies their
 recorded SHA-256 hashes, and checks actual versions. Task is pinned to 3.53.1.
 The helper's comments record checksum sources. Kind uses the verified v1.32.0
 multi-platform node index `sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027`.
-The standard private runner's actual memory and disk are logged; no larger
-runner capacity or successful Linux execution is assumed from local allocation.
+The first fresh Apps CI attempt, [run 39548384375](https://github.com/datum-labs/apps/actions/runs/39548384375)
+([sanitized diagnostics](https://github.com/datum-labs/apps/actions/runs/39548384375/artifacts/12321963368)),
+failed during the unchanged Envoy Gateway HelmRelease install. The gateway Pod
+remained Pending with `Insufficient cpu` on the 2-vCPU private `ubuntu-latest`
+runner; the release timed out after 360 seconds. Flux, Kyverno, and cert-manager
+had already started. Cleanup removed the run-owned cluster. Image preload,
+Milo, Projects, and native Apps authoring were not reached.
+
+The reusable job accepts the Apps repository variable `APPS_NATIVE_RUNNER` as
+an existing runner label and otherwise uses `ubuntu-latest`. Before creating a
+cluster, it reports Linux architecture, effective CPU capacity (affinity and
+cgroup quota), and memory. It fails unless the runner is Linux amd64 with at
+least four effective vCPUs. Four is a trial floor, not a measured sufficient
+capacity for the full Milo and Apps stack. No suitable configured runner has
+been established; this CI gate remains unpassed until one is available and a
+fresh run succeeds. The source-owned component graph and resource requests are
+unchanged; this gate only avoids a six-minute known scheduling timeout.
 
 The source contract also rejects changes to runtime build inputs after the
 published binary revision, before manifest rendering or cluster access. A
 future controller change cannot receive a green native trial by exercising an
 older image. Its image and runner pins must first be updated together. A new
-failure regression covers that rejection; the offline total is now thirty.
+failure regression covers that rejection. Go test-file changes may use the same
+image only when no production Go source has an embed directive. The check
+conservatively requires a rebuilt image whenever embedding or unreadable source
+makes the input set uncertain; it does not interpret Go's embed patterns.
+Production source, non-Go runtime files and build/module inputs remain fenced.
+The offline total is now thirty-nine, including runner-capacity controls.
