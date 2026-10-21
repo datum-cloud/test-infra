@@ -1,0 +1,26 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-native-a1t-crds
+  namespace: milo-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: apps-native-a1t
+    namespace: flux-system
+  path: ./config/crd
+  kubeConfig:
+    secretRef:
+      name: apps-native-a1t-milo-installer
+      key: kubeconfig
+  healthChecks:
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: apptemplates.apps.miloapis.com
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: apptemplaterevisions.apps.miloapis.com

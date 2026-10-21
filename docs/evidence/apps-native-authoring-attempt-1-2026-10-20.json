@@ -1,0 +1,57 @@
+{
+  "run_id": "apps-native-e6f19a57f876d654",
+  "source_revision": "bef6514f0fa5f9ffa50a301415b4a4a26f2a0ff9",
+  "binary_revision": "b28933ec578cfa1ce785948b3063f45698bbd1bf",
+  "image_index": "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12",
+  "arm64_manifest": "sha256:5a202d5ca1416edf006a8b4a779a1a8df6be11774d93b3c4ffc3e484f0c7a798",
+  "arm64_config": "sha256:5ea39c7a90472c9cd506ef5862c73c7fbf8ad3237edd1272a16442795dce2709",
+  "source_config_sha256": "741e49fb0e871688402ba546441918c8b52ee50e83eb28c4819af2fc90408893",
+  "source_config_file_count": 32,
+  "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
+  "project_uids": {
+    "apps-a1t-consumer-a": "8210111d-25fc-4bb7-8e06-991791e19d04",
+    "apps-a1t-consumer-b": "fa2fb232-1781-459e-a914-77914c3ddf30",
+    "apps-a1t-provider": "b8f946a2-2377-4bd5-8865-73ea260bbdb0"
+  },
+  "checks": [
+    "read-only preflight: exact source, isolated APIs, Projects, CA, image and collisions",
+    "private OCI source exact digest pull matched clean Apps config tree"
+  ],
+  "result": "fail",
+  "cleanup": "complete",
+  "private_oci_digest": "sha256:28bad720481f0cfb66e790270788087d1cde0995a13b85264f0230d8bc862d54",
+  "failure_diagnostics": {
+    "milo-system/kustomization/apps-native-a1t-crds": null,
+    "flux-system/kustomization/apps-native-a1t-host": null,
+    "milo-system/kustomization/apps-native-a1t-admission": null,
+    "flux-system/ocirepository/apps-native-a1t": null,
+    "apps-system/deployment/apps-controller": null,
+    "apps-system/certificate/apps-serving-tls": null
+  },
+  "test_duration_seconds": 19.533,
+  "cleanup_actions": [
+    "delete root WC Flux stage and verify absent",
+    "verify both root WCs absent",
+    "revoke dedicated author binding after WC removal",
+    "release held leader Lease",
+    "delete host controller Flux stage and verify absent",
+    "verify manager Deployment absent",
+    "delete root CRD Flux stage and verify absent",
+    "verify owned CRDs absent",
+    "delete namespace",
+    "delete installer-secret",
+    "delete rbac",
+    "delete source",
+    "restore dedicated static auth exactly",
+    "resume Milo core Flux by CAS",
+    "delete registry",
+    "stop private port-forward",
+    "stop private port-forward",
+    "close host API proxy",
+    "close Milo API proxy"
+  ],
+  "cleanup_errors": [],
+  "cleanup_duration_seconds": 22.244,
+  "total_duration_seconds": 41.777,
+  "failure": "authorization get apptemplates.apps.miloapis.com: expected True, got 'no'"
+}

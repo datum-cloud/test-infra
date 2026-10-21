@@ -1,0 +1,14 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: apps-native-a1t
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 5m
+  insecure: true
+  url: oci://apps-a1t-native-registry.flux-system.svc.cluster.local:5000/apps-native
+  # The runner replaces this bootstrap tag with the verified immutable digest
+  # before creating the object. A tag is never reconciled.
+  ref:
+    tag: source-revision-injected-by-runner
