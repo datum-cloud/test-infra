@@ -20,6 +20,10 @@ on:
       - components/service-catalog/billing-crds.yaml
       - docs/apps-native-catalog-crds.md
       - hack/apps_native_fixture_scope.py
+      - hack/bootstrap-apps-native-vz-host.sh
+      - hack/apps_native_vz_audit.py
+      - hack/test_bootstrap_apps_native_vz_host.py
+      - docs/apps-native-vz-host.md
       - hack/bootstrap-apps-native-catalog-installer.py
       - hack/test_apps_native_fixture_scope.py
       - hack/test_bootstrap_apps_native_catalog_installer.py
@@ -56,6 +60,10 @@ on:
       - components/service-catalog/billing-crds.yaml
       - docs/apps-native-catalog-crds.md
       - hack/apps_native_fixture_scope.py
+      - hack/bootstrap-apps-native-vz-host.sh
+      - hack/apps_native_vz_audit.py
+      - hack/test_bootstrap_apps_native_vz_host.py
+      - docs/apps-native-vz-host.md
       - hack/bootstrap-apps-native-catalog-installer.py
       - hack/test_apps_native_fixture_scope.py
       - hack/test_bootstrap_apps_native_catalog_installer.py
