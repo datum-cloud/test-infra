@@ -27,7 +27,7 @@ import yaml
 from apps_native_support import APIProxy, Commands, Kube, RUN_LABEL, private_file, ready, require, wait_for
 from apps_native_fixture_scope import (catalog_installer_intent_digest,
     rollout_static_auth, scope_identity, require_same_identity,
-    verified_flux_remote_secret)
+    verified_flux_remote_secret, wait_authenticated_root)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -148,6 +148,16 @@ def create_owned(kube: Kube, row: tuple, manifest: dict, evidence: dict,
     require(isinstance(uid, str) and uid, f"{key} create response lacks UID")
     evidence["attempted"][key] = uid
     atomic_json(path, evidence)
+
+
+def create_root_role_after_reconnect(milo: Kube, role: dict, evidence: dict,
+                                     path: Path, seconds: float = 45,
+                                     mark_stage=None) -> None:
+    """Gate the first root write after a Milo auth rollout on a read-only GET."""
+    wait_authenticated_root(milo, seconds)
+    if mark_stage is not None:
+        mark_stage("root-role-create")
+    create_owned(milo, ROWS[0], role, evidence, path)
 
 
 def delete_owned(kube: Kube, proxy: APIProxy, row: tuple, evidence: dict,
@@ -457,21 +467,30 @@ def run(args: argparse.Namespace) -> None:
     evidence = {"host_context": args.host_context, "milo_source": MILO_SHA,
                 "milo_port": args.milo_port, "scope_identity": identity,
                 "run_id": state["run_id"], "attempted": {}, "intents": {},
-                "cleanup": "not-requested"}
+                "cleanup": "not-requested", "setup_stage": "journal-written"}
     atomic_json(state_path, state)
     atomic_json(args.evidence_file, evidence)
+    def stage(name: str) -> None:
+        evidence["setup_stage"] = name
+        atomic_json(args.evidence_file, evidence)
     try:
+        stage("suspend-core")
         state["core_suspend_intent"] = True
         atomic_json(state_path, state)
         suspend_core(host, private, state)
         atomic_json(state_path, state)
+        stage("auth-cas-and-rollout")
         state["auth_intent"] = True
         atomic_json(state_path, state)
         patch_auth(host, private, state["auth_uid"], state["old_b64"], state["new_b64"])
         rollout_milo(host)
         role, binding = exact_role_manifests()
-        create_owned(milo, ROWS[0], role, evidence, args.evidence_file)
+        stage("authenticated-root-reconnect")
+        create_root_role_after_reconnect(milo, role, evidence, args.evidence_file,
+                                         mark_stage=stage)
+        stage("root-binding-create")
         create_owned(milo, ROWS[1], binding, evidence, args.evidence_file)
+        stage("scoped-authorization-probes")
         probe_path = private / "probe.kubeconfig"
         probe = kubeconfig(ca, token)
         probe["clusters"][0]["cluster"]["server"] = f"https://127.0.0.1:{args.milo_port}"
@@ -492,17 +511,26 @@ def run(args: argparse.Namespace) -> None:
         ):
             scoped.can_i(verb, resource, expected, name)
         probe_path.unlink()
+        stage("host-flux-secret-create")
         secret = {"apiVersion": "v1", "kind": "Secret",
                   "metadata": {"name": SECRET, "namespace": "milo-system"},
                   "type": "Opaque", "data": {"kubeconfig": base64.b64encode(
                       yaml.safe_dump(kubeconfig(ca, token)).encode()).decode()}}
         create_owned(host, ROWS[2], secret, evidence, args.evidence_file, sensitive=True)
         token = ""
+        stage("host-flux-secret-verify")
         verified_flux_remote_secret(host, identity)
         evidence["complete"] = True
+        evidence["setup_stage"] = "ready"
         atomic_json(args.evidence_file, evidence)
         print("Catalog scoped installer Ready: CA-verified remote Flux identity", flush=True)
-    except Exception:
+    except Exception as error:
+        evidence["setup_failure"] = {"stage": evidence.get("setup_stage", "unknown"),
+                                     "class": type(error).__name__}
+        try:
+            atomic_json(args.evidence_file, evidence)
+        except Exception:
+            pass
         commands.deadline = time.monotonic() + 300
         try:
             cleanup(host, milo, evidence, state, args.evidence_file, state_path, private)

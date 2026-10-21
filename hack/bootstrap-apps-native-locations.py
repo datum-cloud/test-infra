@@ -28,7 +28,7 @@ import yaml
 from apps_native_support import APIProxy, Commands, Kube, RUN_LABEL, private_file, ready, require, wait_for
 from apps_native_operator_flux import create_stage, delete_stage
 from apps_native_fixture_scope import (active_catalog_installer, rollout_static_auth,
-    scope_identity, require_same_identity)
+    scope_identity, require_same_identity, wait_authenticated_root)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -252,6 +252,19 @@ def row_create(cluster: Kube, row: tuple, manifest: dict, evidence: dict,
     if key.startswith("rbac-"):
         require(rbac_digest(result) == evidence["intents"][key], "RBAC response differs from exact source intent")
     return result
+
+
+def create_root_rbac_after_reconnect(milo: Kube, manifests: dict,
+                                     evidence: dict, path: Path,
+                                     seconds: float = 45,
+                                     mark_stage=None) -> None:
+    """Gate the first Locations root writes after static-auth Pod replacement."""
+    wait_authenticated_root(milo, seconds)
+    for row in (ROWS[1], ROWS[7]):
+        if mark_stage is not None:
+            mark_stage("root-" + row[0] + "-create")
+        row_create(milo, row, manifests[row[0]], evidence, path,
+                   rbac_manifests=manifests)
 
 
 def intent_digest(manifest: dict) -> str:
@@ -615,22 +628,30 @@ def run(args: argparse.Namespace) -> None:
                 "installer_run_id": installer["run_id"],
                 "image_index": LOCATIONS_IMAGE, "run_id": run_id,
                 "attempted": {}, "intents": {}, "cleanup": "not-requested",
-                "auth_before_sha256": hashlib.sha256(old_csv.encode()).hexdigest()}
+                "auth_before_sha256": hashlib.sha256(old_csv.encode()).hexdigest(),
+                "setup_stage": "journal-written"}
     atomic_json(state_path, state)
     atomic_json(args.evidence_file, evidence)
+    def stage(name: str) -> None:
+        evidence["setup_stage"] = name
+        atomic_json(args.evidence_file, evidence)
     try:
+        stage("auth-cas-and-rollout")
         state["auth_intent"] = True
         atomic_json(state_path, state)
         patch_auth(host, private, state["auth_uid"],
                    state["old_b64"], state["new_b64"])
         rollout_milo(host)
+        stage("host-git-source")
         row_create(host, ROWS[0], manifests["source"], evidence, args.evidence_file)
         wait_for(lambda: flux_ready(host, ROWS[0], evidence), "Locations Git source Ready", 180)
         source = host.json("-n", "flux-system", "get", "gitrepository", "apps-a1t-locations")
         require(source.get("status", {}).get("artifact", {}).get("revision") ==
                 "sha1:" + LOCATIONS_SHA, "Locations Flux fetched unexpected revision")
-        for row in (ROWS[1], ROWS[7]):
-            row_create(milo, row, manifests["rbac"][row[0]], evidence, args.evidence_file, rbac_manifests=manifests["rbac"])
+        stage("authenticated-root-reconnect")
+        create_root_rbac_after_reconnect(milo, manifests["rbac"], evidence,
+                                         args.evidence_file, mark_stage=stage)
+        stage("scoped-authorization-probes")
         atomic_json(probe_path, scoped_config(ca, token, f"https://127.0.0.1:{args.milo_port}"))
         probe = Kube(commands, probe_path, "scoped")
         try:
@@ -646,6 +667,7 @@ def run(args: argparse.Namespace) -> None:
                 probe.can_i(verb, resource, allowed)
         finally:
             probe_path.unlink(missing_ok=True)
+        stage("host-manager-and-credentials")
         row_create(host, ROWS[2], {"apiVersion": "v1", "kind": "Namespace",
                                   "metadata": {"name": "locations-system"}},
                    evidence, args.evidence_file)
@@ -664,6 +686,7 @@ def run(args: argparse.Namespace) -> None:
         running = verified_running_manager(host)
         evidence["running_manager"] = running
         atomic_json(args.evidence_file, evidence)
+        stage("root-location-class-and-location")
         row_create(milo, ROWS[5], {"apiVersion": "locations.miloapis.com/v1alpha1",
                                      "kind": "LocationClass", "metadata": {"name": CLASS},
                                      "spec": {"controllerName": CONTROLLER}},
@@ -686,9 +709,16 @@ def run(args: argparse.Namespace) -> None:
         evidence["class_condition"] = "Accepted=True"
         evidence["location_condition"] = "Ready=True"
         evidence["publisher"] = "disabled: no hubKubeconfigPath"
+        evidence["setup_stage"] = "ready"
         atomic_json(args.evidence_file, evidence)
         print("Locations readiness passed: real controller accepted class and marked dfw Ready", flush=True)
-    except Exception:
+    except Exception as error:
+        evidence["setup_failure"] = {"stage": evidence.get("setup_stage", "unknown"),
+                                     "class": type(error).__name__}
+        try:
+            atomic_json(args.evidence_file, evidence)
+        except Exception:
+            pass
         commands.deadline = time.monotonic() + 300
         try:
             cleanup(host, milo, evidence, state, args.evidence_file, state_path, private, manifests["flux_contracts"], manifests["rbac"])

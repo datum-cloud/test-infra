@@ -30,6 +30,24 @@ def config(server: str, *, insecure: bool = False) -> dict:
 
 
 class ScopeTest(unittest.TestCase):
+    def test_authenticated_root_reconnect_retries_only_ready_get(self):
+        milo = mock.Mock()
+        milo.k.side_effect = [RuntimeError("transient disconnect"), "ok"]
+        with mock.patch("apps_native_support.time.sleep", return_value=None):
+            scope.wait_authenticated_root(milo, seconds=0.2)
+        self.assertEqual(milo.k.call_args_list,
+                         [mock.call("get", "--raw", "/readyz")] * 2)
+
+    def test_authenticated_root_reconnect_terminal_failure(self):
+        milo = mock.Mock()
+        milo.k.side_effect = RuntimeError("root unavailable")
+        with mock.patch("apps_native_support.time.sleep", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "authenticated Milo root reconnect"):
+                scope.wait_authenticated_root(milo, seconds=0.01)
+        self.assertTrue(milo.k.call_args_list)
+        self.assertTrue(all(call == mock.call("get", "--raw", "/readyz")
+                            for call in milo.k.call_args_list))
+
     def test_loopback_target_rejects_userinfo_proxy_missing_ca_or_insecure(self):
         good = config("https://127.0.0.1:43443")
         self.assertEqual(scope._selected_cluster(good, "selected", host=False, port=43443)[

@@ -16,6 +16,17 @@ SPEC.loader.exec_module(installer)
 
 
 class CatalogInstallerTest(unittest.TestCase):
+    def test_root_reconnect_failure_prevents_role_create(self):
+        stage = mock.Mock()
+        with mock.patch.object(installer, "wait_authenticated_root",
+                               side_effect=RuntimeError("root not ready")), \
+                mock.patch.object(installer, "create_owned") as create:
+            with self.assertRaisesRegex(RuntimeError, "root not ready"):
+                installer.create_root_role_after_reconnect(mock.Mock(), {}, {},
+                    Path("/tmp/no-evidence"), seconds=0.01, mark_stage=stage)
+        create.assert_not_called()
+        stage.assert_not_called()
+
     def test_exact_source_crd_and_webhook_role_and_user_binding(self):
         role, binding = installer.exact_role_manifests()
         self.assertEqual(set(role["rules"][1]["resourceNames"]), installer.EXACT_CRDS)

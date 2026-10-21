@@ -23,6 +23,18 @@ ORG = "apps-a1t-ci-org"
 PROJECTS = ("apps-a1t-provider", "apps-a1t-consumer-a", "apps-a1t-consumer-b")
 
 
+def wait_authenticated_root(milo: Kube, seconds: float = 45) -> None:
+    """Wait for the CA-verified root API after a host-observed Milo rollout.
+
+    Only a read-only authenticated readiness request is retried. Callers must
+    record their create intent and perform each CREATE exactly once afterward.
+    """
+    def ready() -> bool:
+        return milo.k("get", "--raw", "/readyz") == "ok"
+
+    wait_for(ready, "authenticated Milo root reconnect", seconds)
+
+
 def _selected_cluster(config: dict, context: str, *, host: bool, port: int) -> dict:
     require(config.get("current-context") == context and
             len(config.get("contexts", [])) == 1 and
