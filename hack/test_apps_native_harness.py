@@ -67,6 +67,44 @@ class ChangedProjectProxy(FakeProxy):
                           for name in trial.PROJECTS]}
 
 
+class MaterializedHistoryProxy(FakeProxy):
+    """A pending template DELETE commits history after the initial census."""
+
+    def __init__(self, project, project_uid, foreign=False):
+        self.project, self.project_uid, self.foreign = project, project_uid, foreign
+        self.template = {"metadata": {"name": trial.TEMPLATE_NAME, "uid": "created-uid",
+                                      "resourceVersion": "11"}}
+        self.revision = None
+        self.deletes = []
+
+    def get(self, path):
+        if path == trial.PROJECT_API:
+            return {"items": [{"metadata": {"name": self.project,
+                                            "uid": self.project_uid}}]}
+        if path == trial.project_path(self.project, "apptemplates"):
+            return {"items": [self.template] if self.template else []}
+        if path == trial.project_path(self.project, "apptemplaterevisions"):
+            return {"items": [self.revision] if self.revision else []}
+        raise AssertionError(f"unexpected API read: {path}")
+
+    def delete(self, path, uid, rv):
+        self.deletes.append((path, uid, rv))
+        if path.endswith("/apptemplates/" + trial.TEMPLATE_NAME):
+            assert self.template and (uid, rv) == ("created-uid", "11")
+            self.template = None
+            self.revision = {
+                "metadata": {"name": "created-revision", "uid": "revision-uid",
+                             "resourceVersion": "12"},
+                "spec": {"templateUID": "foreign-uid" if self.foreign else "created-uid",
+                         "templateName": trial.TEMPLATE_NAME,
+                         "projectUID": self.project_uid}}
+        elif path.endswith("/apptemplaterevisions/created-revision"):
+            assert self.revision and (uid, rv) == ("revision-uid", "12")
+            self.revision = None
+        else:
+            raise AssertionError(f"unexpected API delete: {path}")
+
+
 class CleanupGatesTest(unittest.TestCase):
     def test_live_harness_revision_requires_fully_clean_source(self):
         revision = "a" * 40
@@ -153,6 +191,7 @@ class CleanupGatesTest(unittest.TestCase):
                  "crds_installed": False, "auth_intent": False,
                  "suspend_intent": False}
         with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "evidence.json").touch(mode=0o600)
             errors = trial.cleanup(SimpleNamespace(), trial.Commands(), state, refs,
                                    FakeProxy(), FakeProxy(), [], {},
                                    Path(temporary) / "evidence.json")
@@ -188,6 +227,7 @@ class CleanupGatesTest(unittest.TestCase):
                  "allowed_template_uids": {}, "auth_intent": False,
                  "suspend_intent": False}
         with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "evidence.json").touch(mode=0o600)
             errors = trial.cleanup(SimpleNamespace(), trial.Commands(), state,
                                    {"admission": [admission], "host": [host],
                                     "crds": [crds]}, FakeProxy(),
@@ -204,12 +244,146 @@ class CleanupGatesTest(unittest.TestCase):
                  "allowed_template_uids": {}, "auth_intent": False,
                  "suspend_intent": False}
         with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "evidence.json").touch(mode=0o600)
             errors = trial.cleanup(SimpleNamespace(), trial.Commands(), state,
                                    {"admission": [admission]}, FakeProxy(),
                                    ChangedProjectProxy(), [], {},
                                    Path(temporary) / "evidence.json")
         self.assertTrue(any("Project set/UID changed" in error for error in errors))
         self.assertEqual(admission.calls, 0)
+
+    def test_template_delete_materializes_history_then_fresh_census_deletes_it(self):
+        project, project_uid = trial.PROJECTS[1], "project-uid"
+        proxy = MaterializedHistoryProxy(project, project_uid)
+        trial.remove_owned_data(proxy, {project: project_uid},
+                                {"created-uid": trial.TEMPLATE_NAME})
+        self.assertEqual([item[1:] for item in proxy.deletes],
+                         [("created-uid", "11"), ("revision-uid", "12")])
+        self.assertIsNone(proxy.revision)
+
+    def test_new_foreign_history_after_template_delete_is_retained(self):
+        project, project_uid = trial.PROJECTS[1], "project-uid"
+        proxy = MaterializedHistoryProxy(project, project_uid, foreign=True)
+        with self.assertRaisesRegex(RuntimeError, "foreign AppTemplateRevision"):
+            trial.remove_owned_data(proxy, {project: project_uid},
+                                    {"created-uid": trial.TEMPLATE_NAME})
+        self.assertEqual(len(proxy.deletes), 1)
+        self.assertIsNotNone(proxy.revision)
+
+
+class CreateIntentTest(unittest.TestCase):
+    def setUp(self):
+        self.project = trial.PROJECTS[1]
+        self.state = {"projects": {self.project: "project-uid"},
+                      "allowed_template_uids": {}}
+        self.args = SimpleNamespace(direct_milo_port=45445)
+        self.fixture = trial.template_object(trial.TEMPLATE_NAME, "native-one")
+
+    def test_create_intent_persists_before_request_and_uid_before_assertion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence, evidence_file = {}, Path(temporary) / "evidence.json"
+            evidence_file.touch(mode=0o600)
+            returned = json.loads(json.dumps(self.fixture))
+            returned["metadata"].update({
+                "uid": "created-uid",
+                "annotations": {"apps.miloapis.com/change-actor-uid": trial.AUTHOR,
+                                "apps.miloapis.com/authoring-project-uid": "project-uid",
+                                "apps.miloapis.com/change-generation": "1"},
+                "finalizers": ["apps.miloapis.com/template-history"]})
+            def request(*args):
+                if args[3] == "POST":
+                    saved = json.loads(evidence_file.read_text())
+                    self.assertEqual(saved["template_create_intents"][0]["phase"],
+                                     "post-started")
+                    self.assertIsNone(saved["template_create_intents"][0]["uid"])
+                    return returned
+                self.assertEqual(json.loads(evidence_file.read_text())[
+                    "template_create_intents"][0]["uid"], "created-uid")
+                raise RuntimeError("reached post-admission GET")
+            with patch.object(trial, "must_http", side_effect=request):
+                with self.assertRaisesRegex(RuntimeError, "reached post-admission GET"):
+                    trial.test_authoring(self.args, self.state, {trial.AUTHOR: "fixture"},
+                                         Path("/public-ca"), None, None,
+                                         lambda _: None, evidence, evidence_file)
+            self.assertEqual(self.state["allowed_template_uids"],
+                             {"created-uid": trial.TEMPLATE_NAME})
+            self.assertEqual(evidence["template_create_intents"][0], {
+                "project": self.project, "project_uid": "project-uid",
+                "name": trial.TEMPLATE_NAME, "digest": self.fixture["spec"]["digest"],
+                "phase": "created-response", "uid": "created-uid"})
+
+    def test_lost_create_response_retains_only_intent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence, evidence_file = {}, Path(temporary) / "evidence.json"
+            evidence_file.touch(mode=0o600)
+            with patch.object(trial, "must_http", side_effect=RuntimeError("response lost")):
+                with self.assertRaisesRegex(RuntimeError, "response lost"):
+                    trial.create_fixture_template(
+                        self.args, self.state, {trial.AUTHOR: "fixture"},
+                        Path("/public-ca"), self.project, self.fixture,
+                        evidence, evidence_file)
+            self.assertEqual(json.loads(evidence_file.read_text())[
+                "template_create_intents"][0]["phase"], "post-started")
+            self.assertFalse(self.state["allowed_template_uids"])
+
+    def test_reserved_guard_annotation_cannot_satisfy_authoring_stamp(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence, evidence_file = {}, Path(temporary) / "evidence.json"
+            evidence_file.touch(mode=0o600)
+            returned = json.loads(json.dumps(self.fixture))
+            returned["metadata"].update({
+                "uid": "created-uid",
+                "annotations": {"apps.miloapis.com/change-actor-uid": trial.AUTHOR,
+                                "apps.miloapis.com/project-uid": "project-uid",
+                                "apps.miloapis.com/change-generation": "1"},
+                "finalizers": ["apps.miloapis.com/template-history"]})
+            with patch.object(trial, "must_http", return_value=returned):
+                with self.assertRaisesRegex(RuntimeError, "native admission did not stamp"):
+                    trial.test_authoring(self.args, self.state, {trial.AUTHOR: "fixture"},
+                                         Path("/public-ca"), None, None,
+                                         lambda _: None, evidence, evidence_file)
+            self.assertEqual(json.loads(evidence_file.read_text())[
+                "template_create_intents"][0]["uid"], "created-uid")
+
+    def test_failed_intent_fsync_never_sends_create(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence, evidence_file = {}, Path(temporary) / "evidence.json"
+            evidence_file.write_text('{"prior":"intact"}\n')
+            with (patch.object(trial.os, "fsync", side_effect=OSError("disk full")),
+                  patch.object(trial, "must_http") as request):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    trial.create_fixture_template(
+                        self.args, self.state, {trial.AUTHOR: "fixture"},
+                        Path("/public-ca"), self.project, self.fixture,
+                        evidence, evidence_file)
+            request.assert_not_called()
+            self.assertEqual(json.loads(evidence_file.read_text()), {"prior": "intact"})
+
+    def test_failed_uid_fsync_keeps_prior_intent_and_in_memory_uid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence, evidence_file = {}, Path(temporary) / "evidence.json"
+            evidence_file.touch(mode=0o600)
+            returned = json.loads(json.dumps(self.fixture))
+            returned["metadata"]["uid"] = "created-uid"
+            original_fsync = trial.os.fsync
+            calls = 0
+            def fsync(fd):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise OSError("uid journal write failed")
+                return original_fsync(fd)
+            with (patch.object(trial.os, "fsync", side_effect=fsync),
+                  patch.object(trial, "must_http", return_value=returned)):
+                with self.assertRaisesRegex(OSError, "uid journal write failed"):
+                    trial.create_fixture_template(
+                        self.args, self.state, {trial.AUTHOR: "fixture"},
+                        Path("/public-ca"), self.project, self.fixture,
+                        evidence, evidence_file)
+            saved = json.loads(evidence_file.read_text())["template_create_intents"][0]
+            self.assertEqual((saved["phase"], saved["uid"]), ("post-started", None))
+            self.assertEqual(self.state["allowed_template_uids"],
+                             {"created-uid": trial.TEMPLATE_NAME})
 
 
 class CLIIntegrationGatesTest(unittest.TestCase):
@@ -246,7 +420,8 @@ class CLIIntegrationGatesTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "injected CLI failure"):
                 trial.delete_history_test(args, {}, {trial.AUTHOR: "fixture"},
                                           Path("/tmp/public-ca"), prior,
-                                          lambda _: None, cli=object())
+                                          lambda _: None, {}, Path("/tmp/evidence.json"),
+                                          cli=object())
         delete.assert_called_once()
         request.assert_not_called()
 
