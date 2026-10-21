@@ -23,12 +23,14 @@ spec.loader.exec_module(fixture)
 
 
 def four_rows():
+    locations_user = fixture._dependency_module(
+        "bootstrap-apps-native-locations.py").USER
     rows = [
         ["admin-token", "admin", "admin", "system:masters"],
         ["test-token", "test-user", "test-user", "system:authenticated"],
         ["installer-token", "apps-a1t-catalog-installer",
          "apps-a1t-catalog-installer", "system:authenticated"],
-        ["locations-token", "apps-a1t-locations", "apps-a1t-locations",
+        ["locations-token", locations_user, locations_user,
          "system:authenticated"],
     ]
     text = io.StringIO()
@@ -37,6 +39,14 @@ def four_rows():
 
 
 class CatalogOperatorContractTests(unittest.TestCase):
+    def test_preflight_failure_reports_fixed_stage_without_exception_payload(self):
+        def fail():
+            raise RuntimeError("test-only secret token must not be logged")
+        with self.assertRaises(fixture.PreflightFailure) as caught:
+            fixture.preflight("static-auth-users", fail)
+        self.assertEqual(str(caught.exception), "static-auth-users/RuntimeError")
+        self.assertNotIn("token", str(caught.exception))
+
     def test_ca_source_renders_only_exact_stable_chain(self):
         contract = ca_contract(Commands(), "1" * 40, "2" * 24)
         self.assertEqual(len(contract["rendered"]), 3)
@@ -78,6 +88,10 @@ kubeconfigPath: /etc/milo/kubeconfig
     def test_four_row_auth_refuses_foreign_identity_and_operator_reuse(self):
         old = four_rows()
         self.assertEqual(len(fixture.auth_rows(old)), 4)
+        producer_user = fixture._dependency_module(
+            "bootstrap-apps-native-locations.py").USER
+        self.assertEqual(fixture.auth_rows(old)[3][1:3],
+                         [producer_user, producer_user])
         new = fixture.extended_auth(old, "a" * 96)
         self.assertEqual(len(list(csv.reader(io.StringIO(
             base64.b64decode(new).decode())))), 5)

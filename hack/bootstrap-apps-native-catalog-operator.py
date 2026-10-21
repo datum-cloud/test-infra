@@ -77,6 +77,21 @@ ROWS = {
 }
 
 
+class PreflightFailure(RuntimeError):
+    def __init__(self, stage: str, reason: str):
+        self.stage = stage
+        self.reason = reason
+        super().__init__(f"{stage}/{reason}")
+
+
+def preflight(stage: str, callback):
+    """Expose only fixed stage and exception class, never credential data."""
+    try:
+        return callback()
+    except Exception as error:
+        raise PreflightFailure(stage, type(error).__name__) from None
+
+
 def _dependency_module(name: str):
     path = ROOT / "hack" / name
     specification = importlib.util.spec_from_file_location(name.replace("-", "_"), path)
@@ -238,11 +253,12 @@ def auth_rows(encoded: str) -> list[list[str]]:
             encoded, validate=True).decode())))
     except (ValueError, TypeError, UnicodeError) as error:
         raise RuntimeError("Milo static auth CSV malformed") from error
+    locations_user = _dependency_module("bootstrap-apps-native-locations.py").USER
     expected = {("admin", "admin", "system:masters"),
                 ("test-user", "test-user", "system:authenticated"),
                 ("apps-a1t-catalog-installer", "apps-a1t-catalog-installer",
                  "system:authenticated"),
-                ("apps-a1t-locations", "apps-a1t-locations", "system:authenticated")}
+                (locations_user, locations_user, "system:authenticated")}
     require(len(rows) == 4 and all(len(row) == 4 and bool(row[0]) for row in rows) and
             {tuple(row[1:]) for row in rows} == expected and
             len({row[0] for row in rows}) == 4,
@@ -1064,17 +1080,20 @@ def run(args: argparse.Namespace) -> None:
     private_evidence(args.evidence_file)
     commands = Commands()
     commands.deadline = time.monotonic() + args.deadline_seconds
-    revision = clean_revision(commands)
+    revision = preflight("signed-source", lambda: clean_revision(commands))
     if args.cleanup:
         evidence = read_journal(args.evidence_file)
         run_id = evidence.get("run_id")
     else:
         require(not args.evidence_file.exists(), "Catalog operator evidence already exists")
         run_id = secrets.token_hex(12)
-    contracts = source_pins(commands, args, revision, run_id)
+    contracts = preflight("source-render", lambda:
+                          source_pins(commands, args, revision, run_id))
     host = Kube(commands, args.host_kubeconfig, args.host_context)
     milo = Kube(commands, args.milo_kubeconfig, "milo-root")
-    identity = scope_identity(host, milo, args.host_context, args.milo_port)
+    identity = preflight("api-scope", lambda:
+                         scope_identity(host, milo, args.host_context,
+                                        args.milo_port))
     state_path = args.evidence_file.parent / ("catalog-operator-" + run_id + "-private.json")
     require(state_path.parent == args.evidence_file.parent and
             not state_path.is_symlink(), "Catalog operator private state path changed")
@@ -1096,30 +1115,39 @@ def run(args: argparse.Namespace) -> None:
         print("Catalog operator optional stage cleanup complete; owned Namespace retained",
               flush=True)
         return
-    predecessors = exact_predecessors(commands, host, milo, identity,
-                                      args, contracts)
-    absence_preflight(host, milo)
-    baseline_webhooks(milo, predecessors["oci"]["rendered"],
-                      predecessors["locationbinding"].get("webhook_uids"))
-    auth = host.json("-n", CORE_NAMESPACE, "get", "secret",
-                     "milo-apiserver-auth-tokens")
+    predecessors = preflight("retained-predecessors", lambda:
+        exact_predecessors(commands, host, milo, identity, args, contracts))
+    preflight("resource-collisions", lambda: absence_preflight(host, milo))
+    preflight("catalog-webhooks", lambda:
+        baseline_webhooks(milo, predecessors["oci"]["rendered"],
+                          predecessors["locationbinding"].get("webhook_uids")))
+    auth = preflight("static-auth", lambda: host.json(
+        "-n", CORE_NAMESPACE, "get", "secret", "milo-apiserver-auth-tokens"))
     locations_state_path = (args.locations_evidence_file.parent /
                             "apps-a1t-locations-private/state.json")
-    locations_state = read_journal(locations_state_path)
-    require(auth["data"].get("tokens.csv") == locations_state.get("new_b64"),
-            "Catalog operator expected exact four-row Locations auth chain")
-    auth_rows(auth["data"]["tokens.csv"])
-    milo_ca = host.json("-n", CORE_NAMESPACE, "get", "secret", "milo-ca-tls")
-    ca_b64 = milo_ca["data"]["ca.crt"]
-    ca_bytes = base64.b64decode(ca_b64, validate=True)
-    require(hashlib.sha256(ca_bytes).hexdigest() == identity["milo"]["ca_sha256"],
-            "Catalog operator Milo CA differs from verified root endpoint")
-    serving = host.json("-n", CORE_NAMESPACE, "get", "secret", "milo-apiserver-tls")
+    locations_state = preflight("static-auth-chain", lambda:
+                                read_journal(locations_state_path))
+    preflight("static-auth-chain", lambda: require(
+        auth["data"].get("tokens.csv") == locations_state.get("new_b64"),
+        "Catalog operator expected exact four-row Locations auth chain"))
+    preflight("static-auth-users", lambda: auth_rows(auth["data"]["tokens.csv"]))
+    milo_ca = preflight("root-public-ca", lambda: host.json(
+        "-n", CORE_NAMESPACE, "get", "secret", "milo-ca-tls"))
+    ca_b64 = preflight("root-public-ca", lambda: milo_ca["data"]["ca.crt"])
+    ca_bytes = preflight("root-public-ca", lambda:
+                         base64.b64decode(ca_b64, validate=True))
+    preflight("root-public-ca", lambda: require(
+        hashlib.sha256(ca_bytes).hexdigest() == identity["milo"]["ca_sha256"],
+        "Catalog operator Milo CA differs from verified root endpoint"))
+    serving = preflight("root-serving-cert", lambda: host.json(
+        "-n", CORE_NAMESPACE, "get", "secret", "milo-apiserver-tls"))
     with tempfile.TemporaryDirectory(prefix="catalog-operator-public-ca-") as temporary:
-        verify_cert(commands, Path(temporary), ca_bytes,
-                    base64.b64decode(serving["data"]["tls.crt"], validate=True),
-                    dns="milo-apiserver.milo-system.svc")
-    require(not state_path.exists(), "Catalog operator private state already exists")
+        preflight("root-serving-cert", lambda: verify_cert(
+            commands, Path(temporary), ca_bytes,
+            base64.b64decode(serving["data"]["tls.crt"], validate=True),
+            dns="milo-apiserver.milo-system.svc"))
+    preflight("private-state-collision", lambda: require(
+        not state_path.exists(), "Catalog operator private state already exists"))
     print("Catalog operator preflight passed: retained source, scope and collisions",
           flush=True)
     if not args.execute:
@@ -1276,6 +1304,10 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+    except PreflightFailure as error:
+        print(f"Catalog operator preflight failed: {error.stage}/{error.reason}",
+              file=sys.stderr)
+        raise SystemExit(1) from None
     except Exception as error:
         # Arbitrary kube errors can echo request fragments, including tokens.
         # The private journal records a fixed stage and exception class only.
