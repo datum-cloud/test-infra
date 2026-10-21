@@ -96,11 +96,14 @@ Ambiguous cleanup stops and reports the retained dependencies for recovery.
 These Kubernetes API checks narrow the race; they do not make the Project
 inventory atomic with concurrent API writes.
 
-This local arm64 fixture is a prerequisite for Apps authoring, not the A1-T
-native Workload-to-route or G4 result. Future CI needs a multi-arch image pin
-and a caller-owned clean private Apps checkout published into the same private
-digest-pinned Flux source pattern; the current runner makes no CI source-access
-claim.
+The runner accepts an explicit `--expected-architecture arm64|amd64` and
+verifies the matching node and running image IDs. Both platform manifests and
+config digests must match the independently verified image evidence. The
+executed live trials below used arm64; amd64 currently has offline contract
+coverage only. This is a prerequisite for Apps authoring, not the A1-T native
+Workload-to-route or G4 result. Fresh-cluster CI still needs reviewed Project
+bootstrap, adequate runner capacity, and a caller-owned clean private Apps
+checkout. No CI source-access or live amd64 result is claimed.
 
 ## Initial lead execution and corrected assertions
 
@@ -166,3 +169,12 @@ admission, restart, numeric and cleanup assertions run alongside the CLI cases.
 `task test-apps-native-offline` passes fourteen harness and three CLI failure
 regressions. Its dedicated path-filtered CI workflow is offline regression only;
 it is not a replacement for the live native trial or the full G4 gate.
+
+## Platform contract follow-up
+
+The platform checks add exact amd64 manifest/config validation and reject a
+wrong node architecture or running image from the other platform. Lead review
+and `task test-apps-native-offline` passed all sixteen harness and three CLI
+cases. Both live and read-only preflight now require verified image evidence.
+The image pin is unchanged; a later provider-runtime pin requires a new live
+trial rather than reusing the older runtime result.

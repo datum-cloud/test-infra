@@ -44,6 +44,10 @@ CONTENT_SAFE_BINARY_SHA = "b28933ec578cfa1ce785948b3063f45698bbd1bf"
 APPS_IMAGE = "ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12"
 ARM_MANIFEST = "sha256:5a202d5ca1416edf006a8b4a779a1a8df6be11774d93b3c4ffc3e484f0c7a798"
 ARM_CONFIG = "sha256:5ea39c7a90472c9cd506ef5862c73c7fbf8ad3237edd1272a16442795dce2709"
+AMD_MANIFEST = "sha256:f397a96926a421fb04966d2f1ef76a49144311b843eba4cd4486f642abe1f102"
+AMD_CONFIG = "sha256:32544b2b4e6c9dc3741dc8634eeaff69505762c4a6b58842c9c15604ed347540"
+PLATFORM_DIGESTS = {"arm64": (ARM_MANIFEST, ARM_CONFIG),
+                    "amd64": (AMD_MANIFEST, AMD_CONFIG)}
 REGISTRY_IMAGE = "docker.io/library/registry@sha256:fa647fc1e5d5df7d8d923fb6332aab8e78783f8fca1a1394efb4011f68f5a793"
 MILO_SHA = "ba4b06e8dde99dd70e9a2f34e011d635e4408a76"
 MILO_IMAGE = "sha256:3a89b1edb93eb3d4bb74808cc031897055e6130bf36aea56d978fcf252464afd"
@@ -323,7 +327,8 @@ def image_contract(path: Path) -> dict:
             "published OCI index differs from exact runtime pin")
     platforms = {(entry["platform"]["os"], entry["platform"]["architecture"]): entry
                  for entry in image.get("platforms", [])}
-    require(set(platforms) == {("linux", "amd64"), ("linux", "arm64")},
+    require(len(image.get("platforms", [])) == 2 and
+            set(platforms) == {("linux", "amd64"), ("linux", "arm64")},
             "published Apps OCI index lacks exact Linux multiarch platform set")
     for entry in platforms.values():
         require(entry.get("revision") == APPS_BINARY_SHA and
@@ -331,9 +336,10 @@ def image_contract(path: Path) -> dict:
                 entry.get("user") == "65532:65532" and
                 entry.get("entrypoint") == ["/apps-controller"],
                 "published Apps platform config labels/identity differ from source")
-    arm = platforms[("linux", "arm64")]
-    require(arm.get("manifest") == ARM_MANIFEST and arm.get("config") == ARM_CONFIG,
-            "published arm64 manifest/config differs from runtime image proof")
+    for architecture, (manifest, config) in PLATFORM_DIGESTS.items():
+        observed = platforms[("linux", architecture)]
+        require(observed.get("manifest") == manifest and observed.get("config") == config,
+                f"published {architecture} manifest/config differs from runtime image proof")
     return image
 
 
@@ -372,6 +378,17 @@ def secret_bytes(kube: Kube, namespace: str, name: str, key_name: str) -> bytes:
     return base64.b64decode(secret["data"][key_name], validate=True)
 
 
+def node_images(node_items: list[dict], architecture: str) -> set[str]:
+    require(architecture in PLATFORM_DIGESTS and len(node_items) == 1 and
+            node_items[0]["status"]["nodeInfo"]["architecture"] == architecture and
+            node_items[0]["status"]["nodeInfo"]["operatingSystem"] == "linux",
+            f"exact Apps runtime requires one Linux/{architecture} Kind node")
+    images = {name for image in node_items[0]["status"].get("images", [])
+              for name in image.get("names", [])}
+    require(APPS_IMAGE in images, "exact Apps OCI index not loaded on isolated Kind node")
+    return images
+
+
 def preflight(args, commands: Commands, contract: dict, fixtures: dict,
               private: Path) -> dict:
     private_file(args.host_kubeconfig)
@@ -386,12 +403,7 @@ def preflight(args, commands: Commands, contract: dict, fixtures: dict,
     assert_local_config(host, None)
     assert_local_config(milo, f"https://127.0.0.1:{args.milo_port}")
     node_items = host.json("get", "nodes")["items"]
-    require(len(node_items) == 1 and node_items[0]["status"]["nodeInfo"]["architecture"] ==
-            "arm64" and node_items[0]["status"]["nodeInfo"]["operatingSystem"] == "linux",
-            "published registry fixture and Apps manifest require one Linux/arm64 Kind node")
-    images = {name for image in node_items[0]["status"].get("images", [])
-              for name in image.get("names", [])}
-    require(APPS_IMAGE in images, "exact Apps OCI index not loaded on isolated Kind node")
+    images = node_images(node_items, args.expected_architecture)
     core = host.json("get", "kustomization", "milo-core", "-n", "flux-system")
     milo_source = host.json("get", "gitrepository", "milo", "-n", "flux-system")
     require(ready(core) and not core["spec"].get("suspend", False),
@@ -741,7 +753,9 @@ def wait_template(port: int, ca: Path, token: str, project: str,
     return wait_for(acknowledged, f"real {project} template history sequence {sequence}", seconds)
 
 
-def pod_snapshot(host: Kube) -> dict:
+def pod_snapshot(host: Kube, architecture: str) -> dict:
+    require(architecture in PLATFORM_DIGESTS, "unsupported exact Apps platform")
+    manifest, config = PLATFORM_DIGESTS[architecture]
     deployment = host.json("get", "deployment", "apps-controller", "-n", "apps-system")
     pods = host.json("get", "pods", "-n", "apps-system", "-l",
                      "app.kubernetes.io/name=apps-controller")["items"]
@@ -761,10 +775,10 @@ def pod_snapshot(host: Kube) -> dict:
                          "image_id": observed[0]["imageID"]})
     require({pod["image_id"] for pod in statuses} <= {
         "docker-pullable://" + APPS_IMAGE, APPS_IMAGE,
-        "docker-pullable://ghcr.io/datum-labs/apps@" + ARM_MANIFEST,
-        "ghcr.io/datum-labs/apps@" + ARM_MANIFEST,
-        "docker://" + ARM_CONFIG},
-        "running Apps image IDs do not map to verified OCI index/arm64 manifest/config")
+        "docker-pullable://ghcr.io/datum-labs/apps@" + manifest,
+        "ghcr.io/datum-labs/apps@" + manifest,
+        "docker://" + config},
+        f"running Apps image IDs do not map to verified OCI index/{architecture} manifest/config")
     return {"deployment_uid": deployment["metadata"]["uid"],
             "pods": sorted(statuses, key=lambda item: item["uid"])}
 
@@ -972,14 +986,14 @@ def post_admission(args, state: dict, tokens: dict, ca_file: Path,
             accepted["status"]["latestRevision"] in {
                 item["metadata"]["name"] for item in revisions},
             "second real spec edit did not append exactly one immutable revision")
-    before_pods = pod_snapshot(host)
+    before_pods = pod_snapshot(host, args.expected_architecture)
     before_template = must_http(port, ca_file, author, "GET",
                                 project_path(project, "apptemplates", name), 200)
     host.k("rollout", "restart", "deployment/apps-controller", "-n", "apps-system")
     host.k("rollout", "status", "deployment/apps-controller", "-n", "apps-system",
            "--timeout=180s", timeout=190)
     def replaced_pods():
-        observed = pod_snapshot(host)
+        observed = pod_snapshot(host, args.expected_architecture)
         old_uids = {item["uid"] for item in before_pods["pods"]}
         new_uids = {item["uid"] for item in observed["pods"]}
         return observed if old_uids.isdisjoint(new_uids) else False
@@ -1333,7 +1347,9 @@ def execute(args, commands: Commands, state: dict, source: dict,
     evidence_file.chmod(0o600)
     evidence = {"run_id": run_id, "source_revision": args.apps_revision,
                 "binary_revision": APPS_BINARY_SHA, "image_index": APPS_IMAGE,
-                "arm64_manifest": ARM_MANIFEST, "arm64_config": ARM_CONFIG,
+                "node_architecture": args.expected_architecture,
+                "platform_manifest": PLATFORM_DIGESTS[args.expected_architecture][0],
+                "platform_config": PLATFORM_DIGESTS[args.expected_architecture][1],
                 "source_config_sha256": source["config_hash"],
                 "source_config_file_count": source["config_count"],
                 "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
@@ -1475,7 +1491,7 @@ def execute(args, commands: Commands, state: dict, source: dict,
                        "kustomizations", "/apis/kustomize.toolkit.fluxcd.io/v1")
         flux_reconcile(host, "kustomization", FLUX_HOST, "flux-system", 600)
         exact_flux(host, FLUX_HOST, "flux-system", digest)
-        before = pod_snapshot(host)
+        before = pod_snapshot(host, args.expected_architecture)
         evidence["initial_pods"] = before
         for name in ("apps-serving-ca", "apps-serving-tls"):
             certificate = host.json("get", "certificate", name, "-n", "apps-system")
@@ -1589,6 +1605,8 @@ def main() -> None:
                         help="exact 40-character source commit including deployment config")
     parser.add_argument("--image-evidence", type=Path,
                         help="published multiarch OCI manifest/label evidence JSON")
+    parser.add_argument("--expected-architecture", choices=sorted(PLATFORM_DIGESTS),
+                        default="arm64", help="exact Linux Kind node and Apps runtime platform")
     parser.add_argument("--host-kubeconfig", type=Path)
     parser.add_argument("--host-context")
     parser.add_argument("--milo-kubeconfig", type=Path)
@@ -1622,14 +1640,14 @@ def main() -> None:
                 build_private_cli(args.datumctl_source, Path(temporary))
             print("Pinned exported datumctl Apps Command build PASS", flush=True)
         return
+    require(args.image_evidence is not None,
+            "read-only/live preflight requires exact multiarch image evidence")
     require(all((args.host_kubeconfig, args.host_context, args.milo_kubeconfig)),
             "explicit host/Milo kubeconfig and host context are required")
     require(600 <= args.deadline_seconds <= 3600, "deadline must be between 600 and 3600s")
     args.host_kubeconfig = args.host_kubeconfig.resolve()
     args.milo_kubeconfig = args.milo_kubeconfig.resolve()
     if args.execute:
-        require(args.image_evidence is not None,
-                "live trial requires exact published OCI image/label evidence")
         require(CONTENT_SAFE_BINARY_SHA == APPS_BINARY_SHA and
                 re.fullmatch(r"[0-9a-f]{40}", CONTENT_SAFE_BINARY_SHA) is not None,
                 "live native trial fenced until exact-content binary and image pins are published")
