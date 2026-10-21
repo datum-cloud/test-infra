@@ -75,7 +75,7 @@ class CleanupGatesTest(unittest.TestCase):
             calls.append(argv)
             return revision if argv[-2:] == ("rev-parse", "HEAD") else ""
         self.assertEqual(trial.harness_revision(SimpleNamespace(run=run)), revision)
-        self.assertEqual(calls[0][-3:], ("status", "--porcelain", "--untracked-files=no"))
+        self.assertEqual(calls[0][-3:], ("status", "--porcelain", "--untracked-files=all"))
         with self.assertRaisesRegex(RuntimeError, "dirty"):
             trial.harness_revision(SimpleNamespace(run=lambda *_: " M hack/script.py"))
 
