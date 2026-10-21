@@ -6,12 +6,13 @@ configurations through remote Flux into Milo root. It uses controller-runtime
 against Kubernetes APIs. It does not deploy Apps installation controllers,
 fabricate an App install, or connect to storage directly.
 
-The corrected controller binary is source
+The initial exact-definition trial used controller source
 `b28933ec578cfa1ce785948b3063f45698bbd1bf`. Its registry-verified multi-platform
 index is `ghcr.io/datum-labs/apps@sha256:da35e283ff2169a28e2a06f294b8fe8a5628bb0298dac024897abc1931587c12`,
 with arm64 manifest `sha256:5a202d5ca1416edf006a8b4a779a1a8df6be11774d93b3c4ffc3e484f0c7a798`
 and config `sha256:5ea39c7a90472c9cd506ef5862c73c7fbf8ad3237edd1272a16442795dce2709`.
-It requires the exact `spec.definitionJSON` and `spec.digest` string contract.
+The current provider runtime pin and rerun appear in the final section. Both
+runtimes require the exact `spec.definitionJSON` and `spec.digest` string contract.
 The runner rejects a source/image mismatch. The lead live API trial passed, including complete cleanup; see the execution
 report below.
 
@@ -178,3 +179,24 @@ and `task test-apps-native-offline` passed all sixteen harness and three CLI
 cases. Both live and read-only preflight now require verified image evidence.
 The image pin is unchanged; a later provider-runtime pin requires a new live
 trial rather than reusing the older runtime result.
+
+## Provider update rerun
+
+The current runner pins controller source
+`0b1c574d8c7ee6e65ce165dee689a9af9bc1e6dc`, image index
+`sha256:bfa9514b9fab3c36efff6cd1e9b700029ecce6d73e41da4b772ae5ddb8686ee9`,
+arm64 manifest `sha256:b945467041c253514d45c2b5e18784a35c80ed43c298b023a3109c2278cffea4`
+and config `sha256:b14c53fa1f41f7579857fa5a25f8cbbd7b086f1e7a8f62845a3a41f6856faee3`,
+plus amd64 manifest `sha256:a6acb1a97d420d248a7ae1c98db1177b9a24fba61dcaf134c690296702900f6a`
+and config `sha256:dc6608b84639ba1f618dddd671012f1809229d201fd874d337ca93bb00518b76`.
+Independent registry reads verified both platforms' source, user and entrypoint.
+
+The lead used Apps config `a8a8ea621e4e27f2c2fc69424d0b1a752dd0a056` and the
+same isolated endpoints/CLI source as above, with the new
+`controller-runtime-provider-image.json` evidence path. The combined API/CLI
+trial passed in **115.586s** (93.272s assertions, 22.313s cleanup), with no
+cleanup errors. See [provider run evidence](evidence/apps-native-provider-cli-lead-2026-10-21.json).
+The first offline invocation used a short SHA and was rejected before cluster
+access; the corrected full-SHA check and first live attempt passed.
+All nineteen offline regressions pass. This proves normal deployed authoring
+with the new public provider timeout, not full outage isolation or installation.
