@@ -19,6 +19,49 @@ spec.loader.exec_module(bootstrap)
 
 
 class BootstrapContractTest(unittest.TestCase):
+    def test_cleanup_retains_root_config_only_on_opt_in_success_and_on_failure(self):
+        for retain in (None, False, True):
+            for fail in (False, True):
+                with self.subTest(retain=retain, fail=fail), tempfile.TemporaryDirectory() as directory:
+                    private = Path(directory).resolve()
+                    host_config, root_config = private / "host.yaml", private / "root.yaml"
+                    for path in (host_config, root_config):
+                        path.write_text("private fixture config")
+                        path.chmod(0o600)
+                    evidence_file = private / "apps-a1t-project-bootstrap-evidence.json"
+                    evidence = {"host_context": "kind-apps-a1t-ci-test", "organization": bootstrap.ORG,
+                                "projects": list(bootstrap.PROJECTS), "run_id": "a" * 24}
+                    bootstrap.write_json_atomic(evidence_file, evidence)
+                    args = SimpleNamespace(deadline_seconds=120, host_kubeconfig=host_config,
+                        root_kubeconfig=root_config, cleanup=True, host_context=evidence["host_context"], milo_port=43443)
+                    if retain is not None:
+                        args.retain_root_kubeconfig = retain
+                    host, milo = mock.Mock(), mock.Mock()
+                    host.k.side_effect = [json.dumps({"clusters": [{"cluster": {"server": "https://127.0.0.1:6443"}}]}), "ok"]
+                    milo.k.return_value = "{}"
+                    def cleanup(*values):
+                        self.assertTrue(root_config.exists())
+                        if fail:
+                            raise RuntimeError("owned cleanup failed")
+                        values[3]["cleanup"] = "complete"
+                        bootstrap.write_json_atomic(values[2], values[3])
+                    with mock.patch.object(bootstrap, "Kube", side_effect=[host, milo]), \
+                         mock.patch.object(bootstrap, "exact_config"), \
+                         mock.patch.object(bootstrap, "source_guard"), \
+                         mock.patch.object(bootstrap, "wait_milo_ready"), \
+                         mock.patch.object(bootstrap, "cleanup_evidenced", side_effect=cleanup):
+                        if fail:
+                            with self.assertRaisesRegex(RuntimeError, "owned cleanup failed"):
+                                bootstrap.run(args)
+                        else:
+                            bootstrap.run(args)
+                    self.assertEqual(root_config.exists(), fail or retain is True)
+                    saved = json.loads(evidence_file.read_text())
+                    self.assertEqual(saved.get("root_kubeconfig_retained", False), not fail and retain is True)
+                    if root_config.exists():
+                        self.assertEqual(root_config.read_text(), "private fixture config")
+                        self.assertEqual(root_config.stat().st_mode & 0o777, 0o600)
+
     def test_cleanup_accepts_only_reviewed_matching_guard_upgrade(self):
         guard_revision = "200de48a305732720377cb83308d57c84fd5f688"
         guard_image = "sha256:784997aec9c3b1cf5dfc993e578b108e7ef627ff835982cb58e74d1b86378a5c"

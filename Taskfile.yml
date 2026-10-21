@@ -490,6 +490,10 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_catalog_installer.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_fixture_scope.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_fixture_scope.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/test_bootstrap_apps_native_catalog_crds.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_catalog_crds.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_operator_flux.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_operator_flux.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_projects.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_ci_capacity.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_forward_milo_reconnecting.py' -v

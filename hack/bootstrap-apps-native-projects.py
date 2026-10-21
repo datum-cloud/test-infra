@@ -386,7 +386,11 @@ def run(args: argparse.Namespace) -> dict:
         wait_milo_ready(milo, min(commands.deadline, time.monotonic() + 30))
         cleanup_evidenced(milo, args.root_kubeconfig, evidence_file, evidence,
                           commands.deadline)
-        args.root_kubeconfig.unlink()
+        if getattr(args, "retain_root_kubeconfig", False):
+            evidence["root_kubeconfig_retained"] = True
+            write_json_atomic(evidence_file, evidence)
+        else:
+            args.root_kubeconfig.unlink()
         return evidence
 
     require(not evidence_file.exists() and not evidence_file.is_symlink(),
@@ -479,7 +483,11 @@ def main() -> None:
     parser.add_argument("--projects", required=True)
     parser.add_argument("--deadline-seconds", type=int, default=600)
     parser.add_argument("--cleanup", action="store_true")
+    parser.add_argument("--retain-root-kubeconfig", action="store_true",
+                        help="retain private root config after UID-safe Project cleanup for dependent API teardown")
     args = parser.parse_args()
+    require(args.cleanup or not args.retain_root_kubeconfig,
+            "--retain-root-kubeconfig is valid only with --cleanup")
     require(args.organization == ORG and args.projects.split(",") == list(PROJECTS),
             "only the reviewed Organization and three Projects are accepted")
     require(1 <= args.milo_port <= 65535 and 120 <= args.deadline_seconds <= 900,

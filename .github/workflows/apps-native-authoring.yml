@@ -160,6 +160,12 @@ jobs:
           test -s test-infra/hack/test_apps_native_fixture_scope.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
             -s test-infra/hack -p 'test_apps_native_fixture_scope.py' -q
+          test -s test-infra/hack/test_bootstrap_apps_native_catalog_crds.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_bootstrap_apps_native_catalog_crds.py' -q
+          test -s test-infra/hack/test_apps_native_operator_flux.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_apps_native_operator_flux.py' -q
           python3 test-infra/hack/test-apps-native-authoring.py \
             --apps-source "$GITHUB_WORKSPACE/apps-source" \
             --apps-revision "$APPS_SOURCE_SHA" \
