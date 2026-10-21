@@ -1,0 +1,20 @@
+# Fixture input for a dedicated single-node ARM Kind member inside the Colima
+# Linux VM. This file is documentation/preflight input, not a Kubernetes
+# manifest and is not included in kustomization.yaml.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: apps-a1t-kata-member
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: KubeletConfiguration
+        allowedUnsafeSysctls:
+          - net.ipv6.conf.all.accept_dad
+          - net.ipv6.conf.default.accept_dad
+    extraMounts:
+      - hostPath: /dev/kvm
+        containerPath: /dev/kvm
+      - hostPath: /lib/modules
+        containerPath: /lib/modules
+        readOnly: true

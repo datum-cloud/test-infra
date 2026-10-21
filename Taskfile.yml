@@ -483,6 +483,7 @@ tasks:
     desc: "Run native Apps harness and CLI regression checks without a cluster"
     cmds:
       - python3 -c 'import yaml'
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_native_kata_prerequisite.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_guard_quota.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_harness.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_flux_prune.py' -v
@@ -490,6 +491,24 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_ci_capacity.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_forward_milo_reconnecting.py' -v
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack/apps_native_cli -p 'test_*.py' -v
+
+  validate-apps-native-kata-artifacts:
+    desc: "Render and strictly validate the pinned Kata provider and chart artifacts"
+    requires:
+      vars:
+        - KATA_PROVIDER_SOURCE
+        - COMPUTE_SOURCE
+        - KATA_PROVIDER_LAYOUT
+        - KATA_CHART_LAYOUT
+        - VMRULE_CRD
+    cmds:
+      - >-
+        PYTHONDONTWRITEBYTECODE=1 python3 hack/check_native_kata_prerequisite.py
+        --provider-source "{{.KATA_PROVIDER_SOURCE}}"
+        --compute-source "{{.COMPUTE_SOURCE}}"
+        --provider-layout "{{.KATA_PROVIDER_LAYOUT}}"
+        --kata-chart-layout "{{.KATA_CHART_LAYOUT}}"
+        --vmrule-crd "{{.VMRULE_CRD}}"
 
   kind-load-image:
     desc: "Load one or more images into KIND"

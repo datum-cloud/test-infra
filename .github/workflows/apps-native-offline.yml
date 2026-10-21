@@ -5,10 +5,17 @@ on:
     paths:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
+      - components/apps-native-kata/**
+      - docs/apps-native-kata-prerequisite.md
+      - hack/check_native_kata_prerequisite.py
+      - hack/test_native_kata_prerequisite.py
       - components/apps-native/**
       - hack/apps_native_support.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
+      - hack/apps_native_guard_quota.py
+      - hack/test_apps_native_guard_quota.py
+      - hack/test_apps_native_flux_prune.py
       - hack/apps_native_cli/**
       - hack/install-apps-native-ci-tools.sh
       - hack/bootstrap-apps-native-projects.py
@@ -21,10 +28,17 @@ on:
     paths:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
+      - components/apps-native-kata/**
+      - docs/apps-native-kata-prerequisite.md
+      - hack/check_native_kata_prerequisite.py
+      - hack/test_native_kata_prerequisite.py
       - components/apps-native/**
       - hack/apps_native_support.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
+      - hack/apps_native_guard_quota.py
+      - hack/test_apps_native_guard_quota.py
+      - hack/test_apps_native_flux_prune.py
       - hack/apps_native_cli/**
       - hack/install-apps-native-ci-tools.sh
       - hack/bootstrap-apps-native-projects.py

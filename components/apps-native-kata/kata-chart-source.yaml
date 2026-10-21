@@ -1,0 +1,15 @@
+# OCI digest pins the exact Kata Deploy chart artifact; the chart version alone
+# would not prove which bytes Flux installs.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: apps-a1t-kata-deploy-chart
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: oci://quay.io/kata-containers/kata-deploy-charts/kata-deploy
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    digest: sha256:33f102f6db70083de4fc8238af4439c4245a601bcb6a72e49bc80529098aefc0
