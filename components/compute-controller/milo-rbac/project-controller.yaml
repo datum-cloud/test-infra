@@ -1,0 +1,177 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-compute-project-controller
+rules:
+  # Compute validates named native ConfigMap/Secret references, then reads
+  # them through ProjectReader and watches source changes. The manager has no
+  # source-object write verbs here.
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - patch
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.datumapis.com
+    resources:
+      - instanceconsolesessions
+      - instances
+      - instancetypes
+      - workloaddeployments
+      - workloads
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.datumapis.com
+    resources:
+      - instanceconsolesessions/finalizers
+      - instances/finalizers
+      - instancetypes/finalizers
+      - workloaddeployments/finalizers
+      - workloads/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - compute.datumapis.com
+    resources:
+      - instanceconsolesessions/status
+      - instances/status
+      - instancetypes/status
+      - workloaddeployments/status
+      - workloads/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - compute.datumapis.com
+    resources:
+      - runtimeclasses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  # Admission validates user access to referenced native resources and network
+  # selections through the Project API's authorization review endpoint.
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+  - apiGroups:
+      - locations.miloapis.com
+    resources:
+      - locations
+      - servinglocations
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.datumapis.com
+    resources:
+      - locationbindings
+      - networkinterfaces
+      - servinglocations
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.datumapis.com
+    resources:
+      - networkinterfaceclaims
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - networking.datumapis.com
+    resources:
+      - networkinterfaces/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - networking.datumapis.com
+    resources:
+      - networks
+    verbs:
+      - get
+      - list
+      - use
+      - watch
+  - apiGroups:
+      - services.miloapis.com
+    resources:
+      - serviceavailabilities
+      - serviceconfigurations
+      - serviceconsumers
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-compute-project-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-compute-project-controller
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: apps-a1t-compute-project

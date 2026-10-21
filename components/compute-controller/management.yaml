@@ -114,26 +114,36 @@ spec:
                         path: downstream-kubeconfig.yaml
                 - name: karmada-token
                   $patch: delete
+                - name: milo-discovery-credentials
+                  secret:
+                    secretName: compute-a1t-milo-discovery-kubeconfig
+                    defaultMode: 0400
+                    items:
+                      - key: kubeconfig
+                        path: kubeconfig
+                - name: milo-project-credentials
+                  secret:
+                    secretName: compute-a1t-milo-project-kubeconfig
+                    defaultMode: 0400
+                    items:
+                      - key: kubeconfig
+                        path: kubeconfig
                 - name: quota-credentials
-                  projected:
-                    sources:
-                      - secret:
-                          name: compute-a1t-quota-client
-                          items:
-                            - key: ca.crt
-                              path: ca.crt
-                            - key: tls.crt
-                              path: tls.crt
-                            - key: tls.key
-                              path: tls.key
-                      - configMap:
-                          name: compute-a1t-quota-kubeconfig
-                          items:
-                            - key: kubeconfig
-                              path: kubeconfig
+                  secret:
+                    secretName: compute-a1t-quota-kubeconfig
+                    defaultMode: 0400
+                    items:
+                      - key: kubeconfig
+                        path: kubeconfig
               containers:
                 - name: manager
                   volumeMounts:
+                    - name: milo-discovery-credentials
+                      mountPath: /etc/milo-discovery
+                      readOnly: true
+                    - name: milo-project-credentials
+                      mountPath: /etc/milo-project
+                      readOnly: true
                     - name: quota-credentials
                       mountPath: /etc/quota-credentials
                       readOnly: true
@@ -156,6 +166,8 @@ spec:
             discovery:
               mode: milo
               clusterName: apps-a1t-pop-dfw-20261020
+              discoveryKubeconfigPath: /etc/milo-discovery/kubeconfig
+              projectKubeconfigPath: /etc/milo-project/kubeconfig
               quotaKubeconfigPath: /etc/quota-credentials/kubeconfig
   healthChecks:
     - apiVersion: apps/v1

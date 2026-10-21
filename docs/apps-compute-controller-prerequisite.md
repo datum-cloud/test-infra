@@ -25,16 +25,21 @@ upstream `config/base/downstream-rbac` ClusterRole and changes only its subject
 to `apps-a1t-compute-manager`, the user in that dedicated hub kubeconfig. It
 does not copy the hub or member administrator kubeconfig into a workload pod.
 
-The management overlay also mounts the separate
-`compute-a1t-quota-client` Secret and
-`compute-a1t-quota-kubeconfig` ConfigMap at `/etc/quota-credentials`. Its
-kubeconfig must point to the three projected certificate files at
-`/etc/quota-credentials/{ca.crt,tls.crt,tls.key}`. This sets the upstream
-`quotaKubeconfigPath`; without it Compute explicitly starts with quota
-enforcement disabled. The cell overlay already composes upstream's optional
-`quota-credentials` component; the DFW cluster needs its own test-owned
-credential Secret and ConfigMap. Credential contents and kubeconfigs are never
-stored in this repository.
+The management overlay mounts three independent test-owned kubeconfig Secrets:
+`compute-a1t-milo-discovery-kubeconfig`,
+`compute-a1t-milo-project-kubeconfig`, and
+`compute-a1t-quota-kubeconfig`. The first authenticates root Project discovery,
+the second is copied into per-Project control-plane clients, and the third
+performs quota ResourceClaim operations. The Compute configuration names all
+three paths explicitly. Compute's config defaults discovery and Project API
+clients to the pod's in-cluster credential when these paths are absent, which
+cannot authenticate to the separate Milo API in this topology. Quota falls
+back to the Project credential only when no separate quota path is configured;
+this fixture deliberately keeps the quota principal separate. The cell overlay
+continues to compose Compute's upstream optional quota component, then replaces
+its default mTLS/ConfigMap projection with the same one-purpose static-token
+quota kubeconfig Secret in the DFW member cluster. No credential bytes or
+kubeconfig content is stored in this repository.
 
 The management manifest removes exactly six upstream observability objects:
 two optional `GrafanaDashboard`s, two `VMRule`s, and their two generated
@@ -53,36 +58,86 @@ invent:
    task-owned Project control planes are Ready. The existing
    `compute-a1t-milo-api-crds` prerequisite only installs schemas; it does not
    grant the manager access to Project APIs.
-2. Determine and test the exact Milo authorization for the manager identity.
-   Compute's upstream `config/components/controller_rbac` ClusterRole and
-   binding are for the local Kubernetes API; they do not specify a Milo
-   Project-scoped grant. The upstream user-facing `compute-admin` IAM Role is
-   not an operator role: it omits WorkloadDeployment/Instance writes,
-   NetworkBinding writes, and quota ResourceClaim access. The manager uses the
-   in-cluster identity for Project discovery and per-Project clients, while
-   quota uses the separately configured kubeconfig. Before install, prove
-   narrowly scoped access for the same manager principal to exactly the three
-   test Projects, including the actual List/watch/create/update/patch/delete
-   verbs exercised by upstream controllers. Do not bind `system:authenticated`
-   or use the Milo bootstrap kubeconfig as a runtime credential.
-3. Compute's source explicitly requests `networkbindings` create/update/patch/
+2. `components/compute-controller/milo-rbac/` is a review fixture derived from
+   Compute `88a7101c2b91f7195c2bb5433c50f54c384a90ce` controller RBAC and
+   request paths, not a production IAM policy. It gives distinct static-token
+   test users these duties: discovery reads root `projects`; the project
+   controller reads native ConfigMap/Secret references and has Compute,
+   networking, location, service-catalog and HPA permissions plus create on
+   `authorization.k8s.io/subjectaccessreviews` for admission checks; quota can
+   only operate quota `resourceclaims`. The manager role has no ConfigMap/Secret
+   write verbs, and quota claim operations belong only to the separate quota
+   user. Do not bind `system:authenticated`, reuse Milo's bootstrap kubeconfig,
+   or use the user-facing `compute-admin` Role as an operator role. That IAM
+   Role omits WorkloadDeployment/Instance and networking writes the controllers
+   need.
+3. The pinned Milo test overlay's auth token file currently defines only its
+   existing bootstrap/test users. Before running this fixture, the isolated
+   Milo test environment needs three separate one-purpose token entries whose
+   usernames exactly match the ClusterRoleBinding subjects, plus three
+   Secret-backed kubeconfigs using the API CA and those tokens. Generate and
+   install these values through the test environment's secret bootstrap; never
+   put token values in this source tree or pod spec. Apply the RBAC bundle to
+   Milo with the existing bootstrap path only after review. No token, Secret,
+   credential, or RBAC object was created by this preparation.
+4. This RBAC fixture cannot scope the provider to the three fixture Projects.
+   Compute's Milo provider starts an unfiltered root `Project` informer, so it
+   needs `list/watch` on all Projects. Kubernetes RBAC `resourceNames` can
+   constrain named `get`, and can constrain `list/watch` only when the client
+   sends a matching `metadata.name` field selector; this provider does not.
+   Milo's project router adds `iam.miloapis.com/parent-name` to authorization
+   extras, but ordinary Kubernetes RBAC in the test overlay matches the same
+   static user across all routed Projects. The project role therefore grants
+   its listed verbs on every Project control plane; three fixture Projects do
+   not create an authorization boundary. This is a test-only limitation, not
+   evidence of production IAM/FGA policy or tenant isolation.
+5. Compute must get/list/watch source Secrets and ConfigMaps because it reads
+   referenced data and watches changes; the current informer pattern cannot
+   limit those dynamic references by name. The role denies their
+   create/update/patch/delete verbs, but its static test token can read
+   unrelated Secret values in every Project. A negative test must expect
+   unrelated Secret reads to succeed and verify write denial; it must not claim
+   secret isolation. RBAC resources, user/role management, impersonation, and
+   `system:masters` are absent from these roles. Discovery is read-only; quota
+   cannot access Compute or core resources.
+6. Before mounting any of the three runtime Secrets, exercise the generated
+   identities directly against the isolated test Milo API. Test the discovery
+   token at the root API and the project/quota tokens at a concrete URL of the
+   form `/apis/resourcemanager.miloapis.com/v1alpha1/projects/<project>/control-plane`.
+   Expect root `GET/LIST/WATCH projects` to succeed and project/Secret reads to
+   fail for the discovery user. For the project user, expect native Workload,
+   Instance, networking and referenced ConfigMap/Secret reads and the
+   validator's SubjectAccessReview create to succeed; expect Secret
+   create/update/patch/delete, ResourceClaim create, RBAC changes and
+   impersonation to fail. Expect the quota user to create/read/list/watch/delete
+   ResourceClaims, but fail reads/writes of Secrets and Compute resources,
+   ResourceClaim status updates, RBAC changes and impersonation. The project
+   user will also pass project-level read/write probes against another Project
+   in this static RBAC setup; record this expected limitation rather than
+   asserting tenant isolation. Use real API requests or trusted test bootstrap
+   authorization probes with the exact bearer identity; do not infer access
+   from a ClusterRole manifest alone. Do not create synthetic claims or fake
+   grants: verify quota using an actual native Instance/ResourceClaim and the
+   real quota evaluator, and report pending admission if no matching allowance
+   is configured.
+7. Compute's source explicitly requests `networkbindings` create/update/patch/
    delete and reads `networkcontexts` (see
    `config/base/downstream-rbac/rbac.yaml`). Confirm the NSO/Milo authorization
    path grants those operations in each Project. The existing Compute
    user-facing IAM roles do not contain networking permissions.
-4. Provision a dedicated Karmada hub identity for the management manager with
+8. Provision a dedicated Karmada hub identity for the management manager with
    only the upstream downstream ClusterRole's resource verbs. Apply that
    upstream ClusterRole/Binding to the separate hub using a temporary,
    test-owned bootstrap credential; the running manager credential must be a
    different Secret and must authenticate as the patched user name. The hub
    must contain the joined DFW member and its expected placement labels.
-5. Provision the separate quota client credential and kubeconfig. Verify the
-   upstream quota evaluator and `ResourceClaim` API are available in all three
-   Projects, with only the claim operations Compute uses (get/list/watch,
-   create, delete); the claim status is read, not written. Confirm the matching
-   project budget/allowance is configured. A missing AllowanceBucket leaves
-   claims pending and prevents instances from becoming ready.
-6. Install and verify the remaining native dependencies before creating a
+9. Verify the upstream quota evaluator and `ResourceClaim` API are available
+   in all three Projects, with only the claim operations Compute uses
+   (get/list/watch, create, delete); the claim status is read, not written.
+   Confirm the matching project budget/allowance is configured. A missing
+   AllowanceBucket leaves claims pending and prevents instances from becoming
+   ready. Do not create a synthetic claim or fake a grant to satisfy readiness.
+10. Install and verify the remaining native dependencies before creating a
    tenant Workload: the Locations API, a Ready DFW `Location`, the DFW
    `locations.miloapis.com/ServingLocation`, and a mirrored Compute
    `ServiceAvailability` for DFW; an Active
@@ -93,7 +148,7 @@ invent:
    resources required by the selected exposure path. The current Service
    Catalog prerequisite establishes CRDs only; the operator, entitlement,
    billing and Locations requirements remain separate gates.
-7. Confirm the test pod/runtime images for any NSO extension, Envoy Gateway,
+11. Confirm the test pod/runtime images for any NSO extension, Envoy Gateway,
    IPAM, Locations, and Karmada components against their exact source revisions
    and OCI digests before adding those manifests. The existing NSO image digest
    in `docs/apps-native-dependencies.md` is matched to its earlier source pin,
@@ -108,17 +163,31 @@ are available. They do not establish project authorization, a Ready
 The native tenant test must assert each of those outcomes separately before it
 can claim Workload-to-route success.
 
-The exact Compute role sources are `config/components/controller_rbac/role.yaml`
-and `config/base/downstream-rbac/rbac.yaml`. The former grants the manager its
-local API permissions, including cell-side claims, Compute status/finalizer
-updates, Location reads and ResourceClaim get/list/watch/create/delete. The
-latter grants the federation client Karmada WorkloadDeployment,
-InstanceType/Instance, NetworkBinding/NetworkContext, policy, Cluster and
-ResourceBinding operations. These roles are not substitutes for Milo's
-Project-scoped authorization. In particular, they do not create a service
-identity grant on the three Milo Project control planes or grant the manager
-NetworkService API writes there. That authorization must be independently
-resolved and verified before enabling any of the optional Kustomizations.
+The exact source path is Compute `cmd/main.go`'s Milo branch and
+`pkg/multicluster-runtime/milo/provider.go`: it watches root Projects without
+a selector, then builds a separate client for each Project control plane.
+`internal/referenceddata/project_reader.go` performs direct named GETs for
+source ConfigMaps and Secrets; `internal/controller/instance_controller.go`
+watches reference kinds and runs companion synchronization. The same
+controller declares quota ResourceClaim `get/list/watch/create/delete`, and
+`internal/quota/client.go` creates a distinct client for each Project. The
+workload admission validator uses the per-Project client to create
+`authorization.k8s.io/subjectaccessreviews` for referenced data and network
+selection, which is why that single create permission is included. The
+fixture splits these operations among discovery, project and quota users.
+Its project rule mirrors the relevant native groups and verbs from upstream
+`config/components/controller_rbac/role.yaml`, removing core ConfigMap/Secret
+mutation and moving quota operations to the separate quota principal. The
+local upstream role and `config/base/downstream-rbac/rbac.yaml` still describe
+local-cluster and separate Karmada-hub access, not production Milo Project
+IAM. Milo `pkg/server/filters/projects.go` adds parent Project identity to the
+authorization extras; test-infra sets `AUTHORIZATION_MODE=RBAC`, so the fixture
+does not treat that extra as a Project-scoping grant.
+
+Compute's native role does not grant NetworkService API writes, and the RBAC
+fixture does not make HTTPRoute exposure or tenant entitlements ready. The
+Apps path must separately verify service entitlement, networking APIs, quota
+admission and route traffic.
 
 ## Offline render
 
@@ -137,6 +206,7 @@ flux build kustomization compute-a1t-dfw-cell \
 flux build kustomization compute-a1t-karmada-rbac \
   --path /tmp/apps-a1t-compute/config/base/downstream-rbac \
   --kustomization-file components/compute-controller/karmada-rbac.yaml --dry-run
+kustomize build components/compute-controller/milo-rbac
 ```
 
 No cluster apply, Docker operation, or secret creation was performed for this

@@ -21,6 +21,29 @@ spec:
   images:
     - name: ghcr.io/datum-cloud/compute
       digest: sha256:1e213d5dcff0be340788d80df6fbdc235b691830667526234ee131240a89e679
+  # This test environment uses Milo's static-token/RBAC mode. Replace the
+  # upstream optional mTLS certificate + ConfigMap projection with the
+  # one-purpose quota kubeconfig Secret provisioned in this member cluster.
+  patches:
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        name: compute-manager
+      patch: |-
+        - op: test
+          path: /spec/template/spec/volumes/0/name
+          value: quota-credentials
+        - op: replace
+          path: /spec/template/spec/volumes/0
+          value:
+            name: quota-credentials
+            secret:
+              secretName: compute-a1t-quota-kubeconfig
+              defaultMode: 0400
+              items:
+                - key: kubeconfig
+                  path: kubeconfig
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
