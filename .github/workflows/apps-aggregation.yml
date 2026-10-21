@@ -83,12 +83,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p diagnostics
+          failed=0
           for source in apps milo datumctl; do
             if test -d "$source/.git"; then
               git -C "$source" status --porcelain=v1 --untracked-files=all > "diagnostics/$source-cleanup.txt"
-              test ! -s "diagnostics/$source-cleanup.txt"
+              test ! -s "diagnostics/$source-cleanup.txt" || failed=1
             fi
           done
+          exit "$failed"
       - name: Upload nonsecret proof and cleanup results
         if: always()
         uses: actions/upload-artifact@v4
