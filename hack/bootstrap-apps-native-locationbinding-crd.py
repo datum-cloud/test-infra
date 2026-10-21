@@ -211,16 +211,7 @@ def live_dependencies(host: Kube, milo: Kube, identity: dict, installer_path: Pa
     require(transition.get("locations_run_id") == locations.get("run_id"),
             "Catalog OCI transition does not bind the retained Locations run")
     verified_live_transition(host, identity, oci_contract, catalog_api, transition)
-    billing_source = host.json("-n", "flux-system", "get", "ocirepository", "catalog-billing")
-    billing_api = host.json("-n", "milo-system", "get", "kustomization",
-                            "service-catalog-billing-crds")
-    require(billing_source["metadata"].get("uid") == catalog_api.get("attempted", {}).get(
-                "flux-system/catalog-billing") and
-            billing_source.get("status", {}).get("artifact", {}).get("revision") == BILLING_DIGEST and
-            billing_api["metadata"].get("uid") == catalog_api.get("attempted", {}).get(
-                "milo-system/service-catalog-billing-crds") and
-            ready(billing_source) and ready(billing_api),
-            "source-owned Catalog API graph is not current")
+    billing_predecessor(host, catalog_api)
     host_stage = host.json("-n", "flux-system", "get", "kustomization",
                            "apps-a1t-locations-host")
     cls = milo.json("get", "locationclass.locations.miloapis.com", "datum-managed")
@@ -236,6 +227,25 @@ def live_dependencies(host: Kube, milo: Kube, identity: dict, installer_path: Pa
             fresh_condition(cls, "Accepted") and fresh_condition(loc, "Ready"),
             "live source-owned Locations readiness prerequisite changed")
     return installer, catalog_api, locations, transition
+
+
+def billing_predecessor(host: Kube, catalog_api: dict) -> None:
+    """Report fixed, noncredential predicate names on a predecessor mismatch."""
+    source = host.json("-n", "flux-system", "get", "ocirepository", "catalog-billing")
+    stage = host.json("-n", "milo-system", "get", "kustomization",
+                      "service-catalog-billing-crds")
+    checks = {
+        "source_uid": source.get("metadata", {}).get("uid") ==
+            catalog_api.get("attempted", {}).get("flux-system/catalog-billing"),
+        "source_digest": source.get("status", {}).get("artifact", {}).get("revision") ==
+            BILLING_DIGEST,
+        "source_ready_current": ready(source),
+        "stage_uid": stage.get("metadata", {}).get("uid") ==
+            catalog_api.get("attempted", {}).get("milo-system/service-catalog-billing-crds"),
+        "stage_ready_current": ready(stage),
+    }
+    require(all(checks.values()), "source-owned Catalog Billing predecessor changed: " +
+            json.dumps(checks, sort_keys=True, separators=(",", ":")))
 
 
 def inventory_preflight(host: Kube, milo: Kube) -> None:

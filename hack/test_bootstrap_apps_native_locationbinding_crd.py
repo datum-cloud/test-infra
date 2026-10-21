@@ -25,6 +25,35 @@ installer_spec.loader.exec_module(installer_source)
 
 
 class RenderContractTests(unittest.TestCase):
+    def test_billing_predecessor_reports_only_fixed_predicates(self):
+        expected_source_uid = "source-uid"
+        expected_stage_uid = "stage-uid"
+        source = {"metadata": {"uid": expected_source_uid, "generation": 2},
+                  "status": {"observedGeneration": 2,
+                             "artifact": {"revision": fixture.BILLING_DIGEST},
+                             "conditions": [{"type": "Ready", "status": "True",
+                                             "observedGeneration": 2}]}}
+        stage = {"metadata": {"uid": expected_stage_uid, "generation": 3},
+                 "status": {"observedGeneration": 3,
+                            "conditions": [{"type": "Ready", "status": "True",
+                                            "observedGeneration": 3}]}}
+        class Host:
+            def json(self, *args):
+                return source if args[-1] == "catalog-billing" else stage
+        journal = {"attempted": {"flux-system/catalog-billing": expected_source_uid,
+                                 "milo-system/service-catalog-billing-crds":
+                                     expected_stage_uid}}
+        fixture.billing_predecessor(Host(), journal)
+        source["status"]["observedGeneration"] = 1
+        source["metadata"]["uid"] = "unexpected-secret-like-value"
+        with self.assertRaisesRegex(RuntimeError, "source-owned Catalog Billing predecessor") as failure:
+            fixture.billing_predecessor(Host(), journal)
+        snapshot = json.loads(str(failure.exception).split(": ", 1)[1])
+        self.assertEqual(snapshot, {"source_uid": False, "source_digest": True,
+                                    "source_ready_current": False, "stage_uid": True,
+                                    "stage_ready_current": True})
+        self.assertNotIn("unexpected-secret-like-value", str(failure.exception))
+
     def test_predecessor_transition_requires_same_locations_run(self):
         identity = {"fixture": "owned"}
         with tempfile.TemporaryDirectory() as directory:
