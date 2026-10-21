@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: apps-a1t-services-ca
+spec:
+  isCA: true
+  commonName: apps-a1t-services-ca
+  secretName: apps-a1t-services-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    kind: Issuer
+    name: apps-a1t-services-selfsigned

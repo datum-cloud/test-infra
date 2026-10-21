@@ -46,7 +46,10 @@ class NativeAPI:
                                   {"op": "test", "path": "/metadata/resourceVersion", "value": self.obj["metadata"]["resourceVersion"]},
                                   {"op": "test", "path": "/spec", "value": self.obj["spec"]}]
         self.patch_calls.append(copy.deepcopy(operations))
-        self.obj["spec"]["patches"] = copy.deepcopy(operations[3]["value"])
+        if operations[3]["op"] == "remove":
+            del self.obj["spec"]["patches"]
+        else:
+            self.obj["spec"]["patches"] = copy.deepcopy(operations[3]["value"])
         self.obj["metadata"]["resourceVersion"] = "2"
         if self.lost_patch:
             raise RuntimeError("patch response lost")
@@ -213,6 +216,34 @@ class FluxPruneTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             owner.delete(api, "run")
         self.assertFalse(api.delete_calls)
+
+    def test_ca_restore_lost_reply_accepts_only_exact_original(self):
+        records = []
+        owner, api = self.owner(journal=lambda state: records.append(state))
+        owner.bind_webhook_ca(Path("/unused"), CA)
+        api.lost_patch = True
+        with self.assertRaisesRegex(RuntimeError, "patch response lost"):
+            owner.restore_webhook_ca(Path("/unused"))
+        saved = copy.deepcopy(records[-1])
+        self.assertTrue(saved["ca_bundle"])
+        self.assertFalse(saved["ca_committed"])
+        restored = FluxOwned(api, "milo-system", "stage", RENDER, REVISION,
+                             records.append)
+        restored.recover(MANIFEST, "run", saved)
+        api.lost_patch = False
+        restored.restore_webhook_ca(Path("/unused"))
+        self.assertEqual(len(api.patch_calls), 2)  # bind, then one restore
+        self.assertIsNone(records[-1]["ca_bundle"])
+        self.assertEqual(api.obj["spec"], restored._initial["spec"])
+        restored.delete(api, "run")
+
+    def test_ca_restore_rejects_foreign_spec_before_patch(self):
+        owner, api = self.owner()
+        owner.bind_webhook_ca(Path("/unused"), CA)
+        api.obj["spec"]["patches"][0]["target"]["name"] = "foreign"
+        with self.assertRaises(RuntimeError):
+            owner.restore_webhook_ca(Path("/unused"))
+        self.assertEqual(len(api.patch_calls), 1)
 
     def test_recovery_is_bound_to_source_render_and_initial_spec(self):
         owner, api = self.owner(lost=True)

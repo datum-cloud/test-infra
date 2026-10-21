@@ -531,6 +531,34 @@ class FluxOwned(Owned):
         self._record()
         return current
 
+    def restore_webhook_ca(self, private: Path) -> dict:
+        """Remove only the public-CA patch this exact stage added.
+
+        A lost PATCH reply leaves a journal that accepts precisely the old or
+        target spec on retry; no other patch can be adopted as cleanup.
+        """
+        require(self.intent and not self._delete_intent and self._ca is not None,
+                "recorded active Flux CA transition required for restore")
+        current = self.kube.optional(self.kind, self.name, self.namespace)
+        require(current is not None, "Flux CA stage disappeared before restore")
+        self.uid = self._validate(current, self._run_id)
+        self._ca_committed = False
+        self._record()  # exact before/after accepted before CAS mutation
+        target = self._initial["spec"]
+        if _flux_spec(current["spec"]) != target:
+            current = self.kube.patch_json(private, self.kind, self.name, [
+                {"op": "test", "path": "/metadata/uid", "value": self.uid},
+                {"op": "test", "path": "/metadata/resourceVersion",
+                 "value": current["metadata"]["resourceVersion"]},
+                {"op": "test", "path": "/spec", "value": current["spec"]},
+                {"op": "remove", "path": "/spec/patches"}], self.namespace)
+        self._validate(current, self._run_id)
+        require(_flux_spec(current["spec"]) == target,
+                "Flux CA restore response did not contain exact original spec")
+        self._ca = None
+        self._record()
+        return current
+
     def delete(self, proxy: APIProxy, run_id: str, timeout: float = 120) -> None:
         if not self.intent:
             return

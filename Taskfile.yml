@@ -500,6 +500,8 @@ tasks:
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_locationbinding_crd.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_operator_flux.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_operator_flux.py' -v
+      - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_catalog_operator.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_catalog_operator.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_bootstrap_apps_native_locations.py
       - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_bootstrap_apps_native_locations.py' -v
       - test -s {{.TASKFILE_DIR}}/hack/test_apps_native_locations_rbac.py

@@ -20,6 +20,11 @@ on:
       - hack/transition-apps-native-catalog-oci.py
       - hack/test_apps_native_catalog_oci.py
       - hack/test_apps_native_operator_flux.py
+      - hack/apps_native_catalog_operator_contract.py
+      - hack/bootstrap-apps-native-catalog-operator.py
+      - hack/test_apps_native_catalog_operator.py
+      - components/service-catalog/operator-ca/**
+      - docs/apps-native-catalog-operator-runtime.md
       - components/service-catalog/api-crds.yaml
       - components/service-catalog/billing-crds.yaml
       - components/service-catalog/source-oci.yaml
@@ -67,6 +72,11 @@ on:
       - hack/transition-apps-native-catalog-oci.py
       - hack/test_apps_native_catalog_oci.py
       - hack/test_apps_native_operator_flux.py
+      - hack/apps_native_catalog_operator_contract.py
+      - hack/bootstrap-apps-native-catalog-operator.py
+      - hack/test_apps_native_catalog_operator.py
+      - components/service-catalog/operator-ca/**
+      - docs/apps-native-catalog-operator-runtime.md
       - components/service-catalog/api-crds.yaml
       - components/service-catalog/billing-crds.yaml
       - components/service-catalog/source-oci.yaml
