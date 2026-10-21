@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/fluxcd/flux2",
+  "tag": "v2.7.5",
+  "commit": "9ecc22ab10ca3940c694c7f4c79f6168e879195e",
+  "crds": {
+    "ocirepositories.source.toolkit.fluxcd.io": {
+      "file": "ocirepositories.source.toolkit.fluxcd.io.yaml",
+      "canonicalSha256": "981fe9fcbffc5d072c0617645a67d98650e92ae278280b177761ac88501ecc36",
+      "kind": "OCIRepository",
+      "group": "source.toolkit.fluxcd.io",
+      "version": "v1",
+      "schemaSha256": "087512fc6ea2178e634d946b63afc0f9a44bd996fe78c2dad6b794bf35d575ea"
+    },
+    "helmreleases.helm.toolkit.fluxcd.io": {
+      "file": "helmreleases.helm.toolkit.fluxcd.io.yaml",
+      "canonicalSha256": "e640d645aa1e62406a33d0804251646e9423025f00b499c6fee24e309d6537ed",
+      "kind": "HelmRelease",
+      "group": "helm.toolkit.fluxcd.io",
+      "version": "v2",
+      "schemaSha256": "117c92a6c0b75ca08f09bda925c29e14fe8c45c7c7ac0e56a2957745eef6efe6"
+    }
+  }
+}
