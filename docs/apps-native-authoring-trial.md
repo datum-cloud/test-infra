@@ -266,3 +266,120 @@ conservatively requires a rebuilt image whenever embedding or unreadable source
 makes the input set uncertain; it does not interpret Go's embed patterns.
 Production source, non-Go runtime files and build/module inputs remain fenced.
 The offline total is now thirty-nine, including runner-capacity controls.
+
+## Dedicated Colima recovery and provider rerun, 2026-10-21
+
+This rerun used the existing `apps-a1t-20261020` Colima profile, not a new
+cluster. Its allocation is 6 vCPUs, 16 GiB RAM and a 40 GiB disk. Start only
+that profile with `colima start --profile apps-a1t-20261020 --activate=false`;
+set `DOCKER_CONTEXT=colima-apps-a1t-20261020` for every Docker/Kind command.
+Keep a private, mode-0700 working directory outside the checkout and explicit,
+mode-0600 kubeconfigs for the gateway, hub, DFW member and Milo root. Use
+`--kubeconfig` and `--context` on kubectl commands; do not switch global
+contexts. The profile's three existing Kind clusters and three existing Milo
+Projects were reused, and all were Ready before the trial.
+For the commands below, set `PRIVATE_DIR=/private/tmp/apps-native-run-20261021`
+or another task-owned mode-0700 directory containing those private kubeconfigs.
+
+This VM restart exposed two local prerequisites. The gateway Kind node's
+source-mounted `/tmp/apps-a1t-audit-policy.yaml` had disappeared and become a
+directory; restore it from `cluster/audit-policy.yaml` with exact SHA-256
+`1deec703d96500d777eedcf3fe71b6282a69d136c1e3ed82e89ca7bf4ffc4fb8`
+before restarting only that node. Verify that the file, not a directory, is
+visible at the mount source inside this dedicated VM. Its default
+`fs.inotify.max_user_instances=128` also exhausted systemd's watchers; the
+gateway node logged `Too many open files`. The scoped repair was
+`colima ssh --profile apps-a1t-20261020 -- sudo sysctl -w
+fs.inotify.max_user_instances=1024`, followed by restarting only that node.
+This sysctl is VM-local and temporary. Check the original file hash and node
+state before applying either repair; do not overwrite an unrelated mount or
+restart another cluster.
+
+For the exact empty-directory failure observed here, a guarded repair is:
+
+```sh
+shasum -a 256 cluster/audit-policy.yaml
+colima ssh --profile apps-a1t-20261020 -- sh -c \
+  'test -d /tmp/apps-a1t-audit-policy.yaml && test -z "$(ls -A /tmp/apps-a1t-audit-policy.yaml)"'
+colima ssh --profile apps-a1t-20261020 -- sudo rmdir /tmp/apps-a1t-audit-policy.yaml
+colima ssh --profile apps-a1t-20261020 -- sudo tee /tmp/apps-a1t-audit-policy.yaml \
+  >/dev/null < cluster/audit-policy.yaml
+colima ssh --profile apps-a1t-20261020 -- sha256sum /tmp/apps-a1t-audit-policy.yaml
+colima ssh --profile apps-a1t-20261020 -- sudo sysctl -w \
+  fs.inotify.max_user_instances=1024
+DOCKER_CONTEXT=colima-apps-a1t-20261020 docker start \
+  apps-a1t-gateway-20261020-control-plane
+```
+
+Each check must pass before the next command. If the mount source is a file,
+inspect and verify its hash instead of running `rmdir` or `tee`.
+
+Milo's API Pod restarts when the fixture briefly adds scoped static-token
+identities. A single `kubectl port-forward` can therefore die during the
+expected rollout. Start the bounded, localhost-only supervisor from the
+test-infra checkout in a separate terminal:
+
+```sh
+python3 hack/forward-milo-reconnecting.py \
+  --host-kubeconfig "$PRIVATE_DIR/apps-a1t-gateway-20261020.kubeconfig" \
+  --host-context kind-apps-a1t-gateway-20261020 \
+  --local-port 42443 --deadline-seconds 2400 \
+  --log-file "$PRIVATE_DIR/milo-forward-reconnect.log"
+```
+
+Stop it after the trial. It restarts the forwarding command only when the
+child exits, pauses one second between attempts, stops on deadline or
+SIGINT/SIGTERM, and terminates the child before exiting. The runner uses
+bounded read-only discovery and HTTP 429 retries; it never retries writes.
+The root kubeconfig targets `https://127.0.0.1:42443` and carries only the
+existing test-cluster bootstrap identity in a host-only file. Do not print it
+or mount it into a Pod.
+
+The exact final invocation from the isolated test-infra checkout was:
+
+```sh
+DOCKER_CONTEXT=colima-apps-a1t-20261020 TMPDIR="$PRIVATE_DIR" \
+  python3 hack/test-apps-native-authoring.py \
+  --apps-source /tmp/apps-native-source-20261021 \
+  --apps-revision 364fb00d4c74f48a2d3d64a5a84299afdf24067d \
+  --image-evidence /tmp/apps-native-source-20261021/apps-execution/evidence/controller-runtime-provider-image.json \
+  --expected-architecture arm64 \
+  --datumctl-source /tmp/apps-native-datumctl-20261021 \
+  --host-kubeconfig "$PRIVATE_DIR/apps-a1t-gateway-20261020.kubeconfig" \
+  --host-context kind-apps-a1t-gateway-20261020 \
+  --milo-kubeconfig "$PRIVATE_DIR/milo-root.kubeconfig" \
+  --milo-port 42443 --direct-milo-port 42445 --registry-port 42500 \
+  --execute
+```
+
+Omit `--execute` to run the complete read-only preflight first. The clean
+Apps source is `364fb00d4c74f48a2d3d64a5a84299afdf24067d`, with published
+runtime `0b1c574d8c7ee6e65ce165dee689a9af9bc1e6dc`; exported datumctl
+source is `91da75c3123282aac7ba276f120ebf93d2a80177`. The final test-infra
+harness was `46b456d683fbd82634c33c19faff0a80006bd332`. It requires a fully
+clean test-infra checkout and records that exact revision in its evidence.
+`PYTHONDONTWRITEBYTECODE=1 task test-apps-native-offline` passed 44 tests.
+
+Three earlier local attempts after the VM restart failed before authoring:
+the first two lost a single root Milo port-forward during the expected API
+rollout, and the third received a transient HTTP 429 during a read-only
+Project census immediately after CRD discovery. The first and third runs
+needed run-ID-specific, UID/resource-version-guarded recovery because the
+runner could not confirm cleanup through the unavailable endpoint. Their
+final recovery checks found no foreign data, restored static auth and Flux,
+and removed the owned CRDs and temporary identities. The second attempt
+cleaned itself. No failed attempt is counted as an authoring pass. These
+failures drove the bounded reconnect and GET-only retry controls in the
+committed harness; no write was retried.
+
+The final real Milo Project API and exported datumctl trial **passed** in
+114.507 seconds: 92.316 seconds for assertions and 22.192 seconds for complete
+cleanup with zero cleanup errors. See [sanitized run evidence](evidence/apps-native-colima-reconnect-cli-2026-10-21.json).
+It includes exact source and image pins, two running controller image IDs,
+fail-closed webhook admission, a held-Lease pending-edit rejection, a named
+bad-CA TLS rejection, project/root authorization denials, history surviving
+two replacement Pods and deletion, datumctl history/diff/dry-run/restore and
+UID/RV deletion, and four exact numeric JSON values. A second read-only
+preflight after cleanup passed with no owned collisions. This is local native
+authoring evidence, not a fresh-cluster CI, production IAM, customer install,
+or Workload-to-route result.

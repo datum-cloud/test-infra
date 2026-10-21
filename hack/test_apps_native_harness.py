@@ -68,6 +68,19 @@ class ChangedProjectProxy(FakeProxy):
 
 
 class CleanupGatesTest(unittest.TestCase):
+    def test_live_harness_revision_requires_fully_clean_source(self):
+        revision = "a" * 40
+        calls = []
+        def run(*argv):
+            calls.append(argv)
+            return revision if argv[-2:] == ("rev-parse", "HEAD") else ""
+        self.assertEqual(trial.harness_revision(SimpleNamespace(run=run)), revision)
+        self.assertEqual(calls[0][-3:], ("status", "--porcelain", "--untracked-files=all"))
+        with self.assertRaisesRegex(RuntimeError, "dirty"):
+            trial.harness_revision(SimpleNamespace(run=lambda *_: " M hack/script.py"))
+        with self.assertRaisesRegex(RuntimeError, "dirty"):
+            trial.harness_revision(SimpleNamespace(run=lambda *_: "?? hack/alternate.py"))
+
     def test_lease_release_accepts_successor_without_deleting_it(self):
         old = {"metadata": {"uid": "fixture", "resourceVersion": "17"},
                "spec": {"holderIdentity": "run"}}
@@ -236,6 +249,59 @@ class CLIIntegrationGatesTest(unittest.TestCase):
                                           lambda _: None, cli=object())
         delete.assert_called_once()
         request.assert_not_called()
+
+
+class MiloRolloutObservationTest(unittest.TestCase):
+    def test_transient_root_disconnect_retries_exact_schema_read(self):
+        expected = {"apptemplates.apps.miloapis.com": "exact-schema-hash"}
+        with patch.object(trial, "check_crds", side_effect=[
+                RuntimeError("port-forward reconnecting"), expected]) as check, \
+                patch.object(trial.time, "sleep", return_value=None):
+            self.assertEqual(trial.wait_exact_crds(None, {}, seconds=1), expected)
+        self.assertEqual(check.call_count, 2)
+
+    def test_persistent_wrong_schema_cannot_pass_retry(self):
+        with patch.object(trial, "check_crds", side_effect=RuntimeError(
+                "native CRD schema differs")), \
+                patch.object(trial.time, "sleep", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "schema differs"):
+                trial.wait_exact_crds(None, {}, seconds=0.01)
+
+
+class PrivateAPIReadRetryTest(unittest.TestCase):
+    def proxy(self):
+        return trial.APIProxy(SimpleNamespace(commands=SimpleNamespace(deadline=None)),
+                              Path('/tmp'), 'offline-test')
+
+    def connection(self, status, body):
+        connection = mock.Mock()
+        response = connection.getresponse.return_value
+        response.status = status
+        response.read.return_value = body
+        return connection
+
+    def test_transient_429_retries_read_only_get(self):
+        first = self.connection(429, b'{}')
+        second = self.connection(200, b'{"items":[]}')
+        with patch('apps_native_support.UnixHTTPConnection',
+                   side_effect=[first, second]) as create, \
+                patch('apps_native_support.time.sleep', return_value=None):
+            self.assertEqual(self.proxy().get('/projects', retry_seconds=1),
+                             {'items': []})
+        self.assertEqual(create.call_count, 2)
+        first.close.assert_called_once()
+        second.close.assert_called_once()
+
+    def test_persistent_429_and_oversized_response_fail_closed(self):
+        with patch('apps_native_support.UnixHTTPConnection',
+                   return_value=self.connection(429, b'{}')) as create:
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 429'):
+                self.proxy().get('/projects', retry_seconds=0)
+        create.assert_called_once()
+        with patch('apps_native_support.UnixHTTPConnection',
+                   return_value=self.connection(200, b'x' * 65537)):
+            with self.assertRaisesRegex(RuntimeError, 'oversized body'):
+                self.proxy().get('/projects', retry_seconds=60)
 
 
 class RuntimeSourcePinTest(unittest.TestCase):
