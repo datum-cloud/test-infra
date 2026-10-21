@@ -1,0 +1,32 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: compute-a1t-milo-api-crds
+  namespace: milo-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 2m
+  prune: true
+  dependsOn:
+    - name: milo-core
+      namespace: flux-system
+  sourceRef:
+    kind: GitRepository
+    name: compute-a1t
+    namespace: flux-system
+  path: ./config/base/crd
+  kubeConfig:
+    secretRef:
+      name: milo-controller-manager-kubeconfig
+      key: kubeconfig
+  healthChecks:
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: workloads.compute.datumapis.com
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: workloaddeployments.compute.datumapis.com
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: instances.compute.datumapis.com
