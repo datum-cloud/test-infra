@@ -104,6 +104,30 @@ def expected_fixture() -> dict[str, dict]:
     return manifests
 
 
+def runtime_source_violations(source: Path, changed_paths: list[str]) -> list[str]:
+    """Allow test-only changes only when production has no embed directives.
+
+    Avoid reimplementing Go's embed grammar. If any production Go file embeds
+    data, or cannot be inspected safely, require a rebuilt image for all changed
+    test files too. False positives preserve the exact-runtime evidence fence.
+    """
+    ordinary = [path for path in changed_paths if not path.endswith("_test.go")]
+    if len(ordinary) == len(changed_paths):
+        return ordinary
+    for go_file in source.rglob("*.go"):
+        if go_file.name.endswith("_test.go"):
+            continue
+        if go_file.is_symlink():
+            return changed_paths
+        try:
+            contents = go_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return changed_paths
+        if re.search(r"(?m)^\s*//go:embed(?:\s|$)", contents):
+            return changed_paths
+    return ordinary
+
+
 def source_contract(commands: Commands, source: Path, revision: str) -> dict:
     require(source.is_absolute() and source.is_dir(), "absolute Apps source checkout required")
     require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None,
@@ -115,6 +139,14 @@ def source_contract(commands: Commands, source: Path, revision: str) -> dict:
     require(commands.run("git", "-C", str(source), "merge-base", "--is-ancestor",
                          APPS_BINARY_SHA, revision) == "",
             "published Apps binary source is not an ancestor of config revision")
+    runtime_changes = commands.run(
+        "git", "-C", str(source), "diff", "--name-only", "-z", APPS_BINARY_SHA, revision,
+        "--", "Dockerfile", ".dockerignore", "go.mod", "go.sum",
+        "cmd/apps-controller", "internal", "pkg")
+    changed_paths = [path for path in runtime_changes.split("\0") if path]
+    runtime_violations = runtime_source_violations(source, changed_paths)
+    require(not runtime_violations,
+            "Apps runtime differs from published image source; publish and pin the new runtime")
     config_hash, config_count = tree_fingerprint(source / "config")
     crds = render(commands, source / "config/crd")
     require({key(item) for item in crds} ==

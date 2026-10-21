@@ -238,6 +238,67 @@ class CLIIntegrationGatesTest(unittest.TestCase):
         request.assert_not_called()
 
 
+class RuntimeSourcePinTest(unittest.TestCase):
+    def test_new_runtime_source_cannot_pass_with_an_older_published_image(self):
+        revision = "b" * 40
+        commands = SimpleNamespace(run=mock.Mock(side_effect=[
+            revision, "", "", "internal/templatecontroller/controller.go"]))
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(trial, "render") as render:
+                with self.assertRaisesRegex(RuntimeError, "runtime differs from published image"):
+                    trial.source_contract(commands, Path(directory).resolve(), revision)
+                render.assert_not_called()
+
+    def test_test_only_go_source_is_allowed_when_not_embedded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            package = source / "internal" / "example"
+            package.mkdir(parents=True)
+            (package / "helper.go").write_text("package example\n")
+            (package / "close_test.go").write_text("package example\n")
+            self.assertEqual(
+                trial.runtime_source_violations(
+                    source, ["internal/example/close_test.go"]), [])
+
+    def test_production_go_change_remains_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            package = source / "pkg" / "example"
+            package.mkdir(parents=True)
+            (package / "helper.go").write_text("package example\n")
+            for changed in ("pkg/example/helper.go", "Dockerfile", ".dockerignore",
+                            "go.mod", "go.sum"):
+                with self.subTest(changed=changed):
+                    self.assertEqual(
+                        trial.runtime_source_violations(source, [changed]), [changed])
+
+    def test_test_file_matched_by_production_embed_is_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            package = source / "internal" / "example"
+            (package / "testdata").mkdir(parents=True)
+            (package / "embed.go").write_text(
+                "package example\n//go:embed testdata\nvar files embed.FS\n")
+            test_file = package / "testdata" / "fixture_test.go"
+            test_file.write_text("test bytes\n")
+            self.assertEqual(
+                trial.runtime_source_violations(
+                    source, ["internal/example/testdata/fixture_test.go"]),
+                ["internal/example/testdata/fixture_test.go"])
+
+    def test_ambiguous_production_embed_syntax_fails_closed_for_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            package = source / "pkg" / "example"
+            package.mkdir(parents=True)
+            (package / "embed.go").write_text(
+                'package example\n//go:embed "assets\\x2f*"\nvar files embed.FS\n')
+            self.assertEqual(
+                trial.runtime_source_violations(
+                    source, ["pkg/example/new_test.go"]),
+                ["pkg/example/new_test.go"])
+
+
 class PlatformPinTest(unittest.TestCase):
     def test_exact_multiarch_evidence_rejects_changed_amd64_digest(self):
         def platform(architecture):

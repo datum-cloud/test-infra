@@ -1,0 +1,335 @@
+# Reusable native Apps authoring CI. The private Apps caller pins this exact
+# reviewed test-infra commit and supplies its own source/image evidence.
+name: Native Apps authoring through Milo
+
+on:
+  workflow_call:
+    inputs:
+      test_infra_sha:
+        description: Exact reviewed test-infra commit used by the caller's reusable workflow reference
+        required: true
+        type: string
+      apps_source_sha:
+        description: Exact private Apps source commit with the reviewed config and image evidence
+        required: true
+        type: string
+      image_evidence_path:
+        description: Repo-relative Apps evidence JSON for the exact published controller image
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native-authoring:
+    runs-on: ${{ vars.APPS_NATIVE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 75
+    env:
+      CLUSTER_NAME: apps-a1t-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      PRIVATE_DIR: /tmp/apps-native-${{ github.run_id }}-${{ github.run_attempt }}
+      KIND_IMAGE_DIGEST: sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027
+      TEST_INFRA_SHA: ${{ inputs.test_infra_sha }}
+      APPS_SOURCE_SHA: ${{ inputs.apps_source_sha }}
+      EVIDENCE_PATH: ${{ inputs.image_evidence_path }}
+    steps:
+      - name: Validate pinned caller inputs before checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == datum-labs/apps ]]
+          [[ "$APPS_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TEST_INFRA_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EVIDENCE_PATH" =~ ^apps-execution/evidence/[a-zA-Z0-9_./-]+\.json$ ]]
+          [[ "$EVIDENCE_PATH" != *..* ]]
+          [[ "$KIND_IMAGE_DIGEST" == sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027 ]]
+          printf 'runner memory KiB: '
+          awk '/MemTotal/ {print $2}' /proc/meminfo
+          printf 'runner available disk KiB: '
+          df -Pk . | awk 'NR==2 {print $4}'
+
+      - name: Checkout exact private Apps source with caller token
+        uses: actions/checkout@v7
+        with:
+          repository: datum-labs/apps
+          ref: ${{ inputs.apps_source_sha }}
+          path: apps-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact public test-infra source
+        uses: actions/checkout@v7
+        with:
+          repository: datum-cloud/test-infra
+          ref: ${{ inputs.test_infra_sha }}
+          path: test-infra
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Verify existing runner capacity before cluster creation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C test-infra rev-parse HEAD)" == "$TEST_INFRA_SHA" ]]
+          PYTHONDONTWRITEBYTECODE=1 python3 test-infra/hack/check-apps-native-ci-capacity.py
+
+      - uses: arduino/setup-task@v3.0.0
+        with:
+          version: 3.53.1
+
+      - name: Install SHA256-verified Linux amd64 tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash test-infra/hack/install-apps-native-ci-tools.sh \
+            "$RUNNER_TEMP/apps-native-tools"
+          printf '%s\n' "$RUNNER_TEMP/apps-native-tools" >> "$GITHUB_PATH"
+
+      - name: Verify tools, clean sources, exact image and offline fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C apps-source rev-parse HEAD)" == "$APPS_SOURCE_SHA" ]]
+          [[ -z "$(git -C apps-source status --porcelain)" ]]
+          [[ "$(git -C test-infra rev-parse HEAD)" == "$TEST_INFRA_SHA" ]]
+          [[ -z "$(git -C test-infra status --porcelain)" ]]
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          caller = Path('apps-source/.github/workflows/apps-native-authoring.yml')
+          source = caller.read_text()
+          sha = os.environ['TEST_INFRA_SHA']
+          uses = re.findall(r'^\s+uses:\s*(datum-cloud/test-infra/\.github/workflows/apps-native-authoring\.yml@[0-9a-f]{40})\s*$', source, re.M)
+          pins = re.findall(r'^\s+test_infra_sha:\s*([0-9a-f]{40})\s*$', source, re.M)
+          if uses != [f'datum-cloud/test-infra/.github/workflows/apps-native-authoring.yml@{sha}'] or pins != [sha]:
+              raise SystemExit('private caller workflow and reviewed test-infra SHA differ')
+          PY
+          test -f test-infra/hack/bootstrap-apps-native-projects.py
+          test -f test-infra/hack/test-apps-native-authoring.py
+          APPS_IMAGE_EVIDENCE="$GITHUB_WORKSPACE/apps-source/$EVIDENCE_PATH"
+          export APPS_IMAGE_EVIDENCE
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          source = Path('apps-source').resolve(strict=True)
+          relative = Path(os.environ['EVIDENCE_PATH'])
+          evidence = (source / relative).resolve(strict=True)
+          if evidence != Path(os.environ['APPS_IMAGE_EVIDENCE']) or \
+                  not evidence.is_relative_to(source) or any(
+              part.is_symlink() for part in [source / Path(*relative.parts[:i])
+                                            for i in range(1, len(relative.parts) + 1)]):
+              raise SystemExit('image evidence path escapes clean Apps source or uses a symlink')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
+              stream.write(f'APPS_IMAGE_EVIDENCE={evidence}\n')
+          PY
+          python3 -m pip install --disable-pip-version-check --no-deps PyYAML==6.0.3
+          [[ "$(task --version)" == 3.53.1 ]]
+          (cd test-infra && task ensure-tools)
+          for tool in kind kubectl kustomize flux openssl docker; do
+            command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
+          done
+          for tool in kind kubectl kustomize flux; do
+            [[ "$(command -v "$tool")" == "$RUNNER_TEMP/apps-native-tools/$tool" ]] || {
+              echo "task ensure-tools did not select pinned $tool" >&2
+              exit 1
+            }
+          done
+          kind --version
+          kustomize version
+          flux --version
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_bootstrap_apps_native_projects.py' -q
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_apps_native_ci_capacity.py' -q
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_apps_native_harness.py' -q
+          python3 test-infra/hack/test-apps-native-authoring.py \
+            --apps-source "$GITHUB_WORKSPACE/apps-source" \
+            --apps-revision "$APPS_SOURCE_SHA" \
+            --image-evidence "$APPS_IMAGE_EVIDENCE" \
+            --expected-architecture amd64 --offline
+          python3 - <<'PY'
+          import ast, json, os
+          from pathlib import Path
+          runner = ast.parse(Path('test-infra/hack/test-apps-native-authoring.py').read_text())
+          pins = {target.id: ast.literal_eval(node.value)
+                  for node in runner.body if isinstance(node, ast.Assign)
+                  for target in node.targets if isinstance(target, ast.Name)
+                  and target.id in {'APPS_IMAGE', 'AMD_CONFIG'}}
+          evidence = json.loads(Path(os.environ['APPS_IMAGE_EVIDENCE']).read_text())
+          amd = [entry for entry in evidence['platforms'] if entry['platform'] ==
+                 {'os': 'linux', 'architecture': 'amd64'}]
+          if len(amd) != 1 or evidence['image'] != pins['APPS_IMAGE'] or \
+                  amd[0]['config'] != pins['AMD_CONFIG']:
+              raise SystemExit('Apps image preload pins differ from exact runner evidence')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
+              stream.write(f"APPS_IMAGE={pins['APPS_IMAGE']}\n")
+              stream.write(f"APPS_AMD_CONFIG={pins['AMD_CONFIG']}\n")
+          PY
+
+      - name: Bootstrap only this run's pinned Kind and Milo control plane
+        shell: bash
+        working-directory: test-infra
+        run: |
+          set -euo pipefail
+          existing="$(kind get clusters)"
+          if grep -Fxq "$CLUSTER_NAME" <<< "$existing"; then
+            echo 'Isolated Kind name already exists; refusing adoption' >&2
+            exit 1
+          fi
+          mkdir -m 700 "$PRIVATE_DIR"
+          printf '%s\n' "$CLUSTER_NAME" > "$PRIVATE_DIR/cluster-create-intent"
+          chmod 600 "$PRIVATE_DIR/cluster-create-intent"
+          task cluster-up CLUSTER_NAME="$CLUSTER_NAME" \
+            K8S_VERSION="v1.32.0@${KIND_IMAGE_DIGEST}" WAIT_TIMEOUT=360s
+          node="$(kind get nodes --name "$CLUSTER_NAME")"
+          [[ "$node" == "${CLUSTER_NAME}-control-plane" ]]
+          docker inspect --type container --format '{{.Id}}' "$node" \
+            > "$PRIVATE_DIR/cluster-node-id"
+          chmod 600 "$PRIVATE_DIR/cluster-node-id"
+          chmod 600 kubeconfig
+          docker pull --platform linux/amd64 "$APPS_IMAGE"
+          [[ "$(docker image inspect --format '{{.Id}}' "$APPS_IMAGE")" == \
+             "$APPS_AMD_CONFIG" ]]
+          kind load docker-image "$APPS_IMAGE" --name "$CLUSTER_NAME"
+          mkdir -p "$GITHUB_WORKSPACE/diagnostics/milo-flux"
+          KUBECONFIG="$PWD/kubeconfig" \
+            MILO_FLUX_CONTEXT="kind-${CLUSTER_NAME}" \
+            MILO_FLUX_DIAG_DIR="$GITHUB_WORKSPACE/diagnostics/milo-flux" \
+            bash hack/test-milo-flux.sh
+
+      - name: Bootstrap real Projects and exercise native authoring
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="$GITHUB_WORKSPACE/test-infra/kubeconfig"
+          root="$PRIVATE_DIR/milo-root.kubeconfig"
+          [[ "$(stat -c %a "$PRIVATE_DIR")" == 700 ]]
+          kubectl --kubeconfig "$host" --context "kind-${CLUSTER_NAME}" \
+            -n milo-system port-forward service/milo-apiserver 18443:6443 \
+            > "$PRIVATE_DIR/milo-forward.log" 2>&1 &
+          forward_pid=$!
+          trap 'kill "$forward_pid" 2>/dev/null || true' EXIT
+          python3 test-infra/hack/bootstrap-apps-native-projects.py \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --milo-port 18443 --root-kubeconfig "$root" \
+            --organization apps-a1t-ci-org \
+            --projects apps-a1t-provider,apps-a1t-consumer-a,apps-a1t-consumer-b
+          [[ "$(stat -c %a "$root")" == 600 ]]
+          TMPDIR="$PRIVATE_DIR" python3 test-infra/hack/test-apps-native-authoring.py \
+            --apps-source "$GITHUB_WORKSPACE/apps-source" \
+            --apps-revision "$APPS_SOURCE_SHA" \
+            --image-evidence "$APPS_IMAGE_EVIDENCE" \
+            --expected-architecture amd64 \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --milo-kubeconfig "$root" --milo-port 18443 \
+            --direct-milo-port 19443 --registry-port 19500 --execute
+
+      - name: Remove recorded Projects only after native fixture cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PRIVATE_DIR/milo-root.kubeconfig"
+          [[ -f "$root" && -f "$PRIVATE_DIR/apps-a1t-project-bootstrap-evidence.json" ]] || exit 0
+          shopt -s nullglob
+          native=("$PRIVATE_DIR"/apps-a1t-native-evidence-*.json)
+          if (( ${#native[@]} != 1 )); then
+            echo 'Native cleanup evidence absent or ambiguous; retaining Projects until owned Kind deletion'
+            exit 0
+          fi
+          status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["cleanup"])' \
+            "${native[0]}")"
+          if [[ "$status" != complete ]]; then
+            echo 'Native cleanup incomplete; retaining Projects until owned Kind deletion'
+            exit 0
+          fi
+          host="$GITHUB_WORKSPACE/test-infra/kubeconfig"
+          kubectl --kubeconfig "$host" --context "kind-${CLUSTER_NAME}" \
+            -n milo-system port-forward service/milo-apiserver 18443:6443 \
+            > "$PRIVATE_DIR/milo-cleanup-forward.log" 2>&1 &
+          forward_pid=$!
+          trap 'kill "$forward_pid" 2>/dev/null || true' EXIT
+          python3 test-infra/hack/bootstrap-apps-native-projects.py \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --milo-port 18443 --root-kubeconfig "$root" \
+            --organization apps-a1t-ci-org \
+            --projects apps-a1t-provider,apps-a1t-consumer-a,apps-a1t-consumer-b \
+            --deadline-seconds 600 --cleanup
+
+      - name: Capture sanitized evidence and cluster state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics/native
+          if [[ -d "$PRIVATE_DIR" ]]; then
+            find "$PRIVATE_DIR" -maxdepth 1 -type f -name 'apps-a1t-native-evidence-*.json' \
+              -exec cp -- '{}' diagnostics/native/ \;
+            if [[ -f "$PRIVATE_DIR/apps-a1t-project-bootstrap-evidence.json" ]]; then
+              cp -- "$PRIVATE_DIR/apps-a1t-project-bootstrap-evidence.json" \
+                diagnostics/native/project-bootstrap.json
+            fi
+          fi
+          if [[ -f test-infra/kubeconfig ]]; then
+            kubectl --kubeconfig test-infra/kubeconfig --context "kind-${CLUSTER_NAME}" \
+              get nodes,pods,deployments -A -o wide > diagnostics/native/cluster.txt 2>&1 || true
+            kubectl --kubeconfig test-infra/kubeconfig --context "kind-${CLUSTER_NAME}" \
+              get events -A --sort-by=.lastTimestamp > diagnostics/native/events.txt 2>&1 || true
+          fi
+
+      - name: Delete only this run's verified Kind cluster and private files
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p diagnostics/native
+          failed=0
+          if command -v kind >/dev/null && \
+             existing="$(kind get clusters 2> diagnostics/native/cleanup.txt)"; then
+            if grep -Fxq "$CLUSTER_NAME" <<< "$existing"; then
+              if [[ ! -f "$PRIVATE_DIR/cluster-create-intent" ]] || \
+                 [[ "$(cat "$PRIVATE_DIR/cluster-create-intent")" != "$CLUSTER_NAME" ]]; then
+                echo 'Refusing deletion without this run creation intent' \
+                  >> diagnostics/native/cleanup.txt
+                failed=1
+              else
+                node="$(kind get nodes --name "$CLUSTER_NAME")" || failed=1
+                if [[ -f "$PRIVATE_DIR/cluster-node-id" ]]; then
+                  id="$(docker inspect --type container --format '{{.Id}}' "$node")" || failed=1
+                  [[ "$id" == "$(cat "$PRIVATE_DIR/cluster-node-id")" ]] || failed=1
+                fi
+                if (( failed == 0 )); then
+                  kind delete cluster --name "$CLUSTER_NAME" \
+                    >> diagnostics/native/cleanup.txt 2>&1 || failed=1
+                else
+                  echo 'Refusing changed owned node identity' >> diagnostics/native/cleanup.txt
+                fi
+              fi
+            else
+              echo 'Owned Kind cluster absent' >> diagnostics/native/cleanup.txt
+            fi
+          elif [[ ! -f "$PRIVATE_DIR/cluster-create-intent" ]]; then
+            echo 'Kind not installed; no owned cluster was requested' \
+              >> diagnostics/native/cleanup.txt
+          else
+            echo 'Could not establish owned Kind cluster inventory' \
+              >> diagnostics/native/cleanup.txt
+            failed=1
+          fi
+          rm -f test-infra/kubeconfig
+          if [[ "$PRIVATE_DIR" == /tmp/apps-native-* ]]; then
+            rm -rf -- "$PRIVATE_DIR"
+          fi
+          exit "$failed"
+
+      - name: Upload sanitized diagnostics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apps-native-authoring-${{ github.run_id }}-${{ github.run_attempt }}
+          path: diagnostics/

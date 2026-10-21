@@ -10,6 +10,12 @@ on:
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
       - hack/apps_native_cli/**
+      - hack/install-apps-native-ci-tools.sh
+      - hack/bootstrap-apps-native-projects.py
+      - hack/test_bootstrap_apps_native_projects.py
+      - hack/check-apps-native-ci-capacity.py
+      - hack/test_apps_native_ci_capacity.py
+      - .github/workflows/apps-native-authoring.yml
   push:
     branches: [main]
     paths:
@@ -20,6 +26,12 @@ on:
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
       - hack/apps_native_cli/**
+      - hack/install-apps-native-ci-tools.sh
+      - hack/bootstrap-apps-native-projects.py
+      - hack/test_bootstrap_apps_native_projects.py
+      - hack/check-apps-native-ci-capacity.py
+      - hack/test_apps_native_ci_capacity.py
+      - .github/workflows/apps-native-authoring.yml
 
 permissions:
   contents: read
