@@ -110,6 +110,7 @@ tasks:
       - echo "  install-observability   [OPTIONAL] Deploy telemetry stack"
       - echo ""
       - echo "🔨 CI/Development:"
+      - echo "  test-apps-native-offline  Run native Apps harness regression without a cluster"
       - echo "  kind-load-image         Load images into KIND"
       - echo "  kind-save-image         Save image tarball artifact"
       - echo ""
@@ -478,6 +479,13 @@ tasks:
   # ------------------------------------------------------------------
   # Helpers for CI
   # ------------------------------------------------------------------
+  test-apps-native-offline:
+    desc: "Run native Apps harness and CLI regression checks without a cluster"
+    cmds:
+      - python3 -c 'import yaml'
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack -p 'test_apps_native_harness.py' -v
+      - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s {{.TASKFILE_DIR}}/hack/apps_native_cli -p 'test_*.py' -v
+
   kind-load-image:
     desc: "Load one or more images into KIND"
     silent: true

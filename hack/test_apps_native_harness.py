@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 from unittest.mock import patch
 
 
@@ -196,6 +197,43 @@ class CleanupGatesTest(unittest.TestCase):
                                    Path(temporary) / "evidence.json")
         self.assertTrue(any("Project set/UID changed" in error for error in errors))
         self.assertEqual(admission.calls, 0)
+
+
+class CLIIntegrationGatesTest(unittest.TestCase):
+    def test_bad_pinned_cli_stops_before_even_read_only_preflight(self):
+        argv = ["native-trial", "--apps-source", "/tmp/fixture-apps",
+                "--apps-revision", "a" * 40,
+                "--datumctl-source", "/tmp/fixture-datumctl",
+                "--host-kubeconfig", "/tmp/host", "--host-context", "owned",
+                "--milo-kubeconfig", "/tmp/milo"]
+        with (mock.patch.object(sys, "argv", argv),
+              mock.patch.object(trial, "expected_fixture", return_value={}),
+              mock.patch.object(trial, "fixture_contract"),
+              mock.patch.object(trial, "source_role_guards"),
+              mock.patch.object(trial, "source_contract", return_value={}),
+              mock.patch.object(trial, "build_private_cli",
+                                side_effect=RuntimeError("injected pin mismatch")) as build,
+              mock.patch.object(trial, "preflight") as preflight):
+            with self.assertRaisesRegex(RuntimeError, "injected pin mismatch"):
+                trial.main()
+        build.assert_called_once()
+        preflight.assert_not_called()
+
+    def test_cli_failure_never_falls_back_to_direct_delete(self):
+        prior = {"template": {"metadata": {
+            "name": trial.TEMPLATE_NAME, "uid": "template-uid",
+            "resourceVersion": "1"}},
+            "revisions": [{"metadata": {"name": "revision-one"}}]}
+        args = SimpleNamespace(direct_milo_port=1)
+        with (mock.patch.object(trial, "delete_with_cli",
+                                side_effect=RuntimeError("injected CLI failure")) as delete,
+              mock.patch.object(trial, "milo_request") as request):
+            with self.assertRaisesRegex(RuntimeError, "injected CLI failure"):
+                trial.delete_history_test(args, {}, {trial.AUTHOR: "fixture"},
+                                          Path("/tmp/public-ca"), prior,
+                                          lambda _: None, cli=object())
+        delete.assert_called_once()
+        request.assert_not_called()
 
 
 if __name__ == "__main__":

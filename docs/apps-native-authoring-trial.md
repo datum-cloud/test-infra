@@ -148,3 +148,21 @@ Lead final result: **PASS**, 118.812s total (85.847s trial, 32.965s cleanup). Se
 [exact run evidence](evidence/apps-native-authoring-lead-2026-10-20.json).
 Twelve offline regression cases also pass. This is a local live authoring result,
 not native CI, production IAM, provider outage, installation or release proof.
+
+## Optional exported datumctl command trial
+
+Add `--datumctl-source /tmp/apps-datumctl-native-definition-cli` using clean
+source `91da75c3123282aac7ba276f120ebf93d2a80177`. The helper builds a private
+copy before cluster access and then runs history, diff, server dry-run restore,
+actual restore to a third revision, server dry-run delete, UID/RV delete, and
+history by the deleted template UID. No-write operations compare every stored
+field, including metadata. Actual restore compares exact definition strings and
+digests. The root OAuth factory is intentionally bypassed; no production login
+or tenant IAM result follows.
+
+Lead live result: **PASS**, 110.932s total, with complete cleanup. See
+[CLI evidence](evidence/apps-native-cli-lead-2026-10-20.json). The same native
+admission, restart, numeric and cleanup assertions run alongside the CLI cases.
+`task test-apps-native-offline` passes fourteen harness and three CLI failure
+regressions. Its dedicated path-filtered CI workflow is offline regression only;
+it is not a replacement for the live native trial or the full G4 gate.

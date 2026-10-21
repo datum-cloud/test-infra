@@ -33,6 +33,8 @@ from apps_native_support import (APIProxy, Commands, Forward, Kube, Owned, HeldL
                                  private_write, ready, require,
                                  tree_fingerprint, verify_cert, wait_for,
                                  certificate_ready)
+from apps_native_cli.driver import (AppsCLI, CLI_SHA, build_private_cli,
+                                    delete_with_cli, exercise_history_diff_restore)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -997,19 +999,33 @@ def post_admission(args, state: dict, tokens: dict, ca_file: Path,
 
 
 def delete_history_test(args, state: dict, tokens: dict, ca_file: Path, prior: dict,
-                        record) -> dict:
+                        record, cli: AppsCLI | None = None) -> dict:
     port, author, project = args.direct_milo_port, tokens[AUTHOR], PROJECTS[1]
     path = project_path(project, "apptemplates", TEMPLATE_NAME)
     old_uid = prior["template"]["metadata"]["uid"]
     old_revisions = {item["metadata"]["name"] for item in prior["revisions"]}
-    delete_options = {"apiVersion": "v1", "kind": "DeleteOptions",
-                      "preconditions": {"uid": old_uid,
-                                        "resourceVersion": prior["template"]["metadata"][
-                                            "resourceVersion"]}}
-    status, _ = milo_request(port, ca_file, author, "DELETE", path, delete_options)
-    require(status in (200, 202), "native template UID/RV deletion failed")
-    wait_for(lambda: milo_request(port, ca_file, author, "GET", path)[0] == 404,
-             "history-protected template deletion", 120)
+    if cli is None:
+        delete_options = {"apiVersion": "v1", "kind": "DeleteOptions",
+                          "preconditions": {"uid": old_uid,
+                                            "resourceVersion": prior["template"]["metadata"][
+                                                "resourceVersion"]}}
+        status, _ = milo_request(port, ca_file, author, "DELETE", path, delete_options)
+        require(status in (200, 202), "native template UID/RV deletion failed")
+        wait_for(lambda: milo_request(port, ca_file, author, "GET", path)[0] == 404,
+                 "history-protected template deletion", 120)
+    else:
+        def snapshot():
+            status, value = milo_request(port, ca_file, author, "GET", path)
+            require(status in (200, 404), "CLI snapshot template GET failed")
+            return {"template": value if status == 200 else None,
+                    "revisions": revision_list(port, ca_file, author, project)}
+        def wait_deleted():
+            wait_for(lambda: milo_request(port, ca_file, author, "GET", path)[0] == 404,
+                     "CLI history-protected template deletion", 120)
+        result = delete_with_cli(cli, snapshot, wait_deleted)
+        require(result["template_uid"] == old_uid and
+                set(result["retained_revision_names"]) == old_revisions,
+                "CLI deletion changed exact expected native history")
     retained = revision_list(port, ca_file, author, project)
     require({item["metadata"]["name"] for item in retained} == old_revisions,
             "template deletion erased immutable history")
@@ -1323,6 +1339,9 @@ def execute(args, commands: Commands, state: dict, source: dict,
                 "identity_mode": "isolated Milo static-token RBAC; production IAM/OpenFGA unverified",
                 "project_uids": state["projects"], "checks": [],
                 "result": "incomplete", "cleanup": "pending"}
+    if args.datumctl_binary is not None:
+        evidence["datumctl_source_revision"] = CLI_SHA
+        evidence["datumctl_checks"] = []
     def record(check: str) -> None:
         evidence["checks"].append(check)
         private_write(evidence_file, json.dumps(evidence, indent=2) + "\n")
@@ -1500,7 +1519,35 @@ def execute(args, commands: Commands, state: dict, source: dict,
         bad_ca_probe(args, milo, private, tokens, ca_file, app_ca, state["milo_ca"])
         record("wrong public CA rejected a named webhook TLS request; exact CA restored")
         history = post_admission(args, state, tokens, ca_file, host, prior, record)
-        deletion = delete_history_test(args, state, tokens, ca_file, history, record)
+        cli = None
+        if args.datumctl_binary is not None:
+            project = PROJECTS[1]
+            cli_config = private / "apps-native-customer-project.kubeconfig"
+            private_write(cli_config, kubeconfig_text(
+                f"https://127.0.0.1:{args.direct_milo_port}{PROJECT_API}/{project}/control-plane",
+                state["milo_ca"], tokens[AUTHOR]))
+            cli = AppsCLI(args.datumctl_binary, cli_config, project,
+                          args.direct_milo_port)
+            path = project_path(project, "apptemplates", TEMPLATE_NAME)
+            def snapshot():
+                return {"template": must_http(args.direct_milo_port, ca_file,
+                                               tokens[AUTHOR], "GET", path, 200),
+                        "revisions": revision_list(args.direct_milo_port, ca_file,
+                                                   tokens[AUTHOR], project)}
+            result = exercise_history_diff_restore(
+                cli, snapshot,
+                lambda sequence: wait_template(args.direct_milo_port, ca_file,
+                                               tokens[AUTHOR], project,
+                                               TEMPLATE_NAME, sequence))
+            history["template"], history["revisions"] = (
+                result["template"], result["revisions"])
+            evidence["datumctl_checks"] = result["checks"]
+            record("exported datumctl history/diff/dry-run and exact-definition restore used real Project API")
+        deletion = delete_history_test(args, state, tokens, ca_file, history, record, cli)
+        if cli is not None:
+            evidence["datumctl_checks"].extend(
+                ["server-dry-run-delete", "uid-rv-delete", "history-after-delete"])
+            record("exported datumctl UID/RV delete retained immutable history by UID")
         precision = precision_test(args, state, tokens, ca_file, record)
         evidence["history"] = {"template_uids": [deletion["original_uid"],
                                                   deletion["replacement_uid"],
@@ -1536,6 +1583,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apps-source", type=Path, required=True,
                         help="absolute clean Apps checkout at --apps-revision")
+    parser.add_argument("--datumctl-source", type=Path,
+                        help=f"optional clean pinned datumctl checkout at {CLI_SHA}; export Apps Command")
     parser.add_argument("--apps-revision", required=True,
                         help="exact 40-character source commit including deployment config")
     parser.add_argument("--image-evidence", type=Path,
@@ -1554,6 +1603,9 @@ def main() -> None:
                       help="run bounded owned-cluster trial after lead review")
     args = parser.parse_args()
     args.apps_source = args.apps_source.resolve()
+    if args.datumctl_source is not None:
+        args.datumctl_source = args.datumctl_source.resolve()
+    args.datumctl_binary = None
     commands = Commands()
     fixtures = expected_fixture()
     fixture_contract(fixtures)
@@ -1565,6 +1617,10 @@ def main() -> None:
           "two fail-closed webhook configurations, two-replica host overlay, scoped fixture",
           flush=True)
     if args.offline:
+        if args.datumctl_source is not None:
+            with tempfile.TemporaryDirectory(prefix="apps-a1t-native-cli-offline-") as temporary:
+                build_private_cli(args.datumctl_source, Path(temporary))
+            print("Pinned exported datumctl Apps Command build PASS", flush=True)
         return
     require(all((args.host_kubeconfig, args.host_context, args.milo_kubeconfig)),
             "explicit host/Milo kubeconfig and host context are required")
@@ -1581,6 +1637,8 @@ def main() -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="apps-a1t-native-private-") as temporary:
             private = Path(temporary)
+            if args.datumctl_source is not None:
+                args.datumctl_binary = build_private_cli(args.datumctl_source, private)
             state = preflight(args, commands, source, fixtures, private)
             print("Native Apps read-only preflight PASS: isolated contexts, exact node image, "
                   "real Projects and CA, no object collisions", flush=True)
