@@ -265,7 +265,49 @@ image only when no production Go source has an embed directive. The check
 conservatively requires a rebuilt image whenever embedding or unreadable source
 makes the input set uncertain; it does not interpret Go's embed patterns.
 Production source, non-Go runtime files and build/module inputs remain fenced.
-The offline total is now thirty-nine, including runner-capacity controls.
+The offline total is now forty-eight, including runner-capacity controls and
+the Organization-scoped Project bootstrap regression.
+
+## Fresh dedicated VZ Project bootstrap, 2026-10-21
+
+A new `apps-native-vz-20261021` Colima profile (VZ, nested virtualization,
+6 vCPUs, 16 GiB RAM, 40 GiB disk) hosted the fresh
+`apps-a1t-ci-vz-20261021` Kind cluster. `/dev/kvm` existed in the VM; an
+independent host probe opened it and returned KVM API version 12. The exact
+Kind node index was
+`sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027`.
+Flux, cert-manager with CSI, Kyverno, Envoy Gateway, and Milo all reached
+their source-owned readiness gates. Milo fetched source
+`ba4b06e8dde99dd70e9a2f34e011d635e4408a76` and metrics source
+`0bb44b7ed38b37bf5266596f135a50947baf03e1`; the authenticated Gateway
+API probe returned HTTP 200. The private host kubeconfig and diagnostics are
+under `/private/tmp/apps-native-vz-host-20261021`. This is a fresh baseline
+bootstrap, not a Workload or traffic result.
+
+The first public-API Project bootstrap failed at the Project create webhook:
+the helper posted at Milo root, while the source-owned mutator requires the
+Organization parent context. Its recorded Organization and attempted Project
+were deleted with UID/resource-version checks. The second attempt created all
+three Projects through the Organization control-plane URL, but looked for
+`ProjectControlPlane` in Milo root. That CRD is served by the separate host
+infrastructure API. All four owned resources were removed. The third attempt
+confirmed three real Milo Projects `Ready=True` and host ProjectControlPlanes
+with matching Project UIDs, then waited on the host records' default
+`ControlPlaneReady=False/Creating` condition. This test overlay has no
+infrastructure reconciler that marks those records Ready. The wait was stopped
+and the exact recorded resources were cleaned up. The corrected gate requires
+the Project `Ready` condition, a matching host record, and real public Project
+API discovery; it records the host condition without changing it.
+
+The final attempt passed for one Organization and three Ready Projects, with
+three matching host ProjectControlPlane records and all three public Project
+API discovery responses. The host records still report
+`ControlPlaneReady=False/Creating`, so ProjectControlPlane discovery mode is
+not established. Apps authoring uses Milo's Project discovery mode. The
+host-only root kubeconfig is mode 0600; it remains private for the next
+source-owned service stage. The [sanitized four-attempt report](evidence/apps-native-vz-project-bootstrap-2026-10-21.json)
+records each cleanup result and the final UIDs/conditions without credentials.
+The older QEMU profile and global Docker/kubectl contexts were untouched.
 
 ## Dedicated Colima recovery and provider rerun, 2026-10-21
 

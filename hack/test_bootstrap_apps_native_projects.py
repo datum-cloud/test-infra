@@ -61,19 +61,23 @@ class BootstrapContractTest(unittest.TestCase):
                             "labels": {"resourcemanager.miloapis.com/project-uid": "p-uid",
                                        "resourcemanager.miloapis.com/project-name":
                                            bootstrap.PROJECTS[0]}},
-               "status": {"conditions": [{"type": "ControlPlaneReady", "status": "True",
-                                          "observedGeneration": 1}]}}
-        class Kube:
-            def optional(self, kind, name):
-                return pcp if kind == bootstrap.PCP_RESOURCE else project
-        self.assertTrue(bootstrap.project_ready(Kube(), bootstrap.PROJECTS[0],
+               "status": {"conditions": [{"type": "ControlPlaneReady", "status": "False",
+                                          "reason": "Creating"}]}}
+        milo = SimpleNamespace(optional=mock.Mock(return_value=project))
+        host = SimpleNamespace(optional=mock.Mock(return_value=pcp))
+        self.assertTrue(bootstrap.project_ready(milo, host, bootstrap.PROJECTS[0],
                                                 "p-uid", "run"))
+        milo.optional.assert_called_with(bootstrap.PROJECT_RESOURCE, bootstrap.PROJECTS[0])
+        host.optional.assert_called_with(bootstrap.PCP_RESOURCE, bootstrap.PROJECTS[0])
+        self.assertEqual(bootstrap.project_control_plane_observation(
+            host, bootstrap.PROJECTS[0], "p-uid")["conditions"],
+            [{"type": "ControlPlaneReady", "status": "False", "reason": "Creating"}])
         pcp["metadata"]["labels"]["resourcemanager.miloapis.com/project-uid"] = "other"
         with self.assertRaisesRegex(RuntimeError, "does not match Project UID"):
-            bootstrap.project_ready(Kube(), bootstrap.PROJECTS[0], "p-uid", "run")
+            bootstrap.project_ready(milo, host, bootstrap.PROJECTS[0], "p-uid", "run")
         pcp["metadata"]["labels"]["resourcemanager.miloapis.com/project-uid"] = "p-uid"
         project["status"]["conditions"][0]["observedGeneration"] = 1
-        self.assertFalse(bootstrap.project_ready(Kube(), bootstrap.PROJECTS[0],
+        self.assertFalse(bootstrap.project_ready(milo, host, bootstrap.PROJECTS[0],
                                                  "p-uid", "run"))
 
     def test_refuse_foreign_cleanup_before_delete_and_use_uid_rv(self):
@@ -224,6 +228,30 @@ class BootstrapContractTest(unittest.TestCase):
             saved = json.loads(evidence_file.read_text())
             self.assertEqual(saved["attempted"], {bootstrap.ORG: "org-uid"})
             self.assertEqual(saved["uids"], {bootstrap.ORG: "org-uid"})
+
+    def test_project_post_requires_real_organization_api_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_file = Path(directory).resolve() / "evidence.json"
+            evidence = {"run_id": "f" * 24, "attempted": {}, "uids": {}}
+            bootstrap.write_json_atomic(evidence_file, evidence)
+            project = bootstrap.project_manifest(bootstrap.PROJECTS[0], "f" * 24)
+            root = SimpleNamespace(create=mock.Mock(), k=mock.Mock(return_value=json.dumps(
+                {"metadata": {"uid": "project-uid"}})))
+            with self.assertRaisesRegex(RuntimeError, "Organization API context"):
+                bootstrap.create_recorded(root, project, bootstrap.PROJECTS[0],
+                                          {}, evidence, evidence_file)
+            root.create.assert_not_called()
+            expected_server = ("https://127.0.0.1:43443/apis/"
+                               "resourcemanager.miloapis.com/v1alpha1/organizations/"
+                               "apps-a1t-ci-org/control-plane")
+            self.assertEqual(bootstrap.organization_context_server(43443), expected_server)
+            created = {}
+            bootstrap.create_recorded(root, project, bootstrap.PROJECTS[0],
+                                      created, evidence, evidence_file,
+                                      project_server=expected_server)
+            root.k.assert_called_once_with("--server", expected_server, "create", "-f",
+                                           "-", "-o", "json", input_text=json.dumps(project))
+            self.assertEqual(created[bootstrap.PROJECTS[0]], "project-uid")
 
 
 if __name__ == "__main__":
