@@ -42,19 +42,19 @@ from apps_native_cli.driver import (AppsCLI, CLI_SHA, build_private_cli,
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APPS_BINARY_SHA = "0b1c574d8c7ee6e65ce165dee689a9af9bc1e6dc"
+APPS_BINARY_SHA = "37404c9f4364e456b23e77a57c9f01a65a250666"
 # Registry-verified exact-definition runtime; keep this fence source-matched.
-CONTENT_SAFE_BINARY_SHA = "0b1c574d8c7ee6e65ce165dee689a9af9bc1e6dc"
-APPS_IMAGE = "ghcr.io/datum-labs/apps@sha256:bfa9514b9fab3c36efff6cd1e9b700029ecce6d73e41da4b772ae5ddb8686ee9"
-ARM_MANIFEST = "sha256:b945467041c253514d45c2b5e18784a35c80ed43c298b023a3109c2278cffea4"
-ARM_CONFIG = "sha256:b14c53fa1f41f7579857fa5a25f8cbbd7b086f1e7a8f62845a3a41f6856faee3"
-AMD_MANIFEST = "sha256:a6acb1a97d420d248a7ae1c98db1177b9a24fba61dcaf134c690296702900f6a"
-AMD_CONFIG = "sha256:dc6608b84639ba1f618dddd671012f1809229d201fd874d337ca93bb00518b76"
+CONTENT_SAFE_BINARY_SHA = "37404c9f4364e456b23e77a57c9f01a65a250666"
+APPS_IMAGE = "ghcr.io/datum-labs/apps@sha256:8eb09c545ba3f1e8f1a7eddb9f5667ae914786cf4da1d63a21cd38ef7652e610"
+ARM_MANIFEST = "sha256:bcb1f61d50892016c3701210d6a3bbf76fb6ee015e5a55280fcbd19c2bc555b7"
+ARM_CONFIG = "sha256:44e712c7c713ac7a3078112cc191ea732799c77c129d519bfc64baf78a8bb4a6"
+AMD_MANIFEST = "sha256:65890f10a73fd056458b16d7098256ae7385fea6acbff69b59628dc3d0c7f3f6"
+AMD_CONFIG = "sha256:2c3919924423e1c2cd7fe037aceed55c1618955c7cdd02975180e81b44f36699"
 PLATFORM_DIGESTS = {"arm64": (ARM_MANIFEST, ARM_CONFIG),
                     "amd64": (AMD_MANIFEST, AMD_CONFIG)}
 REGISTRY_IMAGE = "docker.io/library/registry@sha256:fa647fc1e5d5df7d8d923fb6332aab8e78783f8fca1a1394efb4011f68f5a793"
-MILO_SHA = "ba4b06e8dde99dd70e9a2f34e011d635e4408a76"
-MILO_IMAGE = "sha256:3a89b1edb93eb3d4bb74808cc031897055e6130bf36aea56d978fcf252464afd"
+MILO_SHA = "200de48a305732720377cb83308d57c84fd5f688"
+MILO_IMAGE = "sha256:784997aec9c3b1cf5dfc993e578b108e7ef627ff835982cb58e74d1b86378a5c"
 PROJECTS = ("apps-a1t-provider", "apps-a1t-consumer-a", "apps-a1t-consumer-b")
 PROJECT_API = "/apis/resourcemanager.miloapis.com/v1alpha1/projects"
 APPS_API = "/apis/apps.miloapis.com/v1alpha1"

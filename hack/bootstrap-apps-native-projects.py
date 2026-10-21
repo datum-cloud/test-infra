@@ -294,18 +294,28 @@ def cleanup_evidenced(milo: Kube, config: Path, evidence_file: Path,
     require(not errors, "owned Project cleanup incomplete: " + "; ".join(errors))
 
 
-def source_guard(host: Kube) -> None:
+def source_guard(host: Kube, *, cleanup: bool = False) -> None:
     source = host.json("get", "gitrepository", "milo", "-n", "flux-system")
     core = host.json("get", "kustomization", "milo-core", "-n", "flux-system")
-    require(source["spec"].get("ref") == {"commit": MILO_SHA} and
+    # Creation remains bound to the original bootstrap. Cleanup may also use
+    # the independently reviewed guard upgrade; never accept an arbitrary pin
+    # or a source/image combination from different builds.
+    reviewed = {MILO_SHA: MILO_IMAGE}
+    if cleanup:
+        reviewed["200de48a305732720377cb83308d57c84fd5f688"] = (
+            "sha256:784997aec9c3b1cf5dfc993e578b108e7ef627ff835982cb58e74d1b86378a5c")
+    revision = source.get("spec", {}).get("ref", {}).get("commit")
+    require(revision in reviewed, "unreviewed Milo revision for bootstrap mode")
+    image = reviewed[revision]
+    require(source["spec"].get("ref") == {"commit": revision} and
             source["spec"].get("url") == "https://github.com/milo-os/milo.git" and
             source.get("status", {}).get("artifact", {}).get("revision") ==
-                "sha1:" + MILO_SHA and
+                "sha1:" + revision and
             core["spec"].get("path") == "./config/overlays/test-infra" and
             core["spec"].get("sourceRef") == {"kind": "GitRepository", "name": "milo"} and
             core["spec"].get("images") == [{"name": "ghcr.io/milo-os/milo",
-                                             "digest": MILO_IMAGE}] and
-            core.get("status", {}).get("lastAppliedRevision", "").endswith(MILO_SHA) and
+                                             "digest": image}] and
+            core.get("status", {}).get("lastAppliedRevision", "").endswith(revision) and
             ready(source) and ready(core) and not core["spec"].get("suspend", False),
             "host Milo Flux source, overlay, or image differs from reviewed pin")
 
@@ -358,7 +368,7 @@ def run(args: argparse.Namespace) -> dict:
                          host_config["clusters"][0]["cluster"]["server"]) is not None,
             "host kubeconfig must use loopback Kind API")
     require(host.k("get", "--raw", "/readyz") == "ok", "host Kind API not ready")
-    source_guard(host)
+    source_guard(host, cleanup=args.cleanup)
     evidence_file = args.root_kubeconfig.parent / "apps-a1t-project-bootstrap-evidence.json"
     if args.cleanup:
         require(not evidence_file.is_symlink(), "bootstrap evidence symlink refused")

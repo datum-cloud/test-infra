@@ -147,6 +147,9 @@ jobs:
             -s test-infra/hack -p 'test_apps_native_ci_capacity.py' -q
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
             -s test-infra/hack -p 'test_apps_native_harness.py' -q
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s test-infra/hack -p 'test_upgrade_apps_native_milo_guard.py' -q
+          PYTHONDONTWRITEBYTECODE=1 python3 test-infra/hack/test-apps-ownership-guard.py --offline
           python3 test-infra/hack/test-apps-native-authoring.py \
             --apps-source "$GITHUB_WORKSPACE/apps-source" \
             --apps-revision "$APPS_SOURCE_SHA" \
@@ -182,6 +185,12 @@ jobs:
             exit 1
           fi
           mkdir -m 700 "$PRIVATE_DIR"
+          [[ ! -e kubeconfig && ! -L kubeconfig ]] || {
+            echo 'Refusing existing workspace kubeconfig' >&2
+            exit 1
+          }
+          printf '%s\n' "$CLUSTER_NAME" > "$PRIVATE_DIR/kubeconfig-create-intent"
+          chmod 600 "$PRIVATE_DIR/kubeconfig-create-intent"
           printf '%s\n' "$CLUSTER_NAME" > "$PRIVATE_DIR/cluster-create-intent"
           chmod 600 "$PRIVATE_DIR/cluster-create-intent"
           task cluster-up CLUSTER_NAME="$CLUSTER_NAME" \
@@ -192,6 +201,8 @@ jobs:
             > "$PRIVATE_DIR/cluster-node-id"
           chmod 600 "$PRIVATE_DIR/cluster-node-id"
           chmod 600 kubeconfig
+          sha256sum kubeconfig | cut -d ' ' -f 1 > "$PRIVATE_DIR/kubeconfig-sha256"
+          chmod 600 "$PRIVATE_DIR/kubeconfig-sha256"
           docker pull --platform linux/amd64 "$APPS_IMAGE"
           [[ "$(docker image inspect --format '{{.Id}}' "$APPS_IMAGE")" == \
              "$APPS_AMD_CONFIG" ]]
@@ -209,17 +220,38 @@ jobs:
           host="$GITHUB_WORKSPACE/test-infra/kubeconfig"
           root="$PRIVATE_DIR/milo-root.kubeconfig"
           [[ "$(stat -c %a "$PRIVATE_DIR")" == 700 ]]
-          kubectl --kubeconfig "$host" --context "kind-${CLUSTER_NAME}" \
-            -n milo-system port-forward service/milo-apiserver 18443:6443 \
-            > "$PRIVATE_DIR/milo-forward.log" 2>&1 &
+          python3 test-infra/hack/forward-milo-reconnecting.py \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --local-port 18443 --deadline-seconds 3600 \
+            --log-file "$PRIVATE_DIR/milo-forward.log" &
           forward_pid=$!
-          trap 'kill "$forward_pid" 2>/dev/null || true' EXIT
+          stop_forward() {
+            kill "$forward_pid" 2>/dev/null || true
+            for attempt in {1..50}; do
+              kill -0 "$forward_pid" 2>/dev/null || break
+              sleep 0.2
+            done
+            kill -KILL "$forward_pid" 2>/dev/null || true
+            wait "$forward_pid" 2>/dev/null || true
+          }
+          trap stop_forward EXIT
           python3 test-infra/hack/bootstrap-apps-native-projects.py \
             --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
             --milo-port 18443 --root-kubeconfig "$root" \
             --organization apps-a1t-ci-org \
             --projects apps-a1t-provider,apps-a1t-consumer-a,apps-a1t-consumer-b
           [[ "$(stat -c %a "$root")" == 600 ]]
+          PYTHONDONTWRITEBYTECODE=1 python3 test-infra/hack/upgrade-apps-native-milo-guard.py \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --milo-kubeconfig "$root" \
+            --bootstrap-evidence "$PRIVATE_DIR/apps-a1t-project-bootstrap-evidence.json" \
+            --journal "$PRIVATE_DIR/milo-guard-upgrade.json" \
+            --upgrade-port 20443 --execute
+          PYTHONDONTWRITEBYTECODE=1 python3 test-infra/hack/test-apps-ownership-guard.py \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --milo-kubeconfig "$root" --milo-context milo-root --milo-port 18443 \
+            --bootstrap-evidence "$PRIVATE_DIR/apps-a1t-project-bootstrap-evidence.json" \
+            --project apps-a1t-provider --expected-user admin
           TMPDIR="$PRIVATE_DIR" python3 test-infra/hack/test-apps-native-authoring.py \
             --apps-source "$GITHUB_WORKSPACE/apps-source" \
             --apps-revision "$APPS_SOURCE_SHA" \
@@ -249,11 +281,21 @@ jobs:
             exit 0
           fi
           host="$GITHUB_WORKSPACE/test-infra/kubeconfig"
-          kubectl --kubeconfig "$host" --context "kind-${CLUSTER_NAME}" \
-            -n milo-system port-forward service/milo-apiserver 18443:6443 \
-            > "$PRIVATE_DIR/milo-cleanup-forward.log" 2>&1 &
+          python3 test-infra/hack/forward-milo-reconnecting.py \
+            --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
+            --local-port 18443 --deadline-seconds 900 \
+            --log-file "$PRIVATE_DIR/milo-cleanup-forward.log" &
           forward_pid=$!
-          trap 'kill "$forward_pid" 2>/dev/null || true' EXIT
+          stop_forward() {
+            kill "$forward_pid" 2>/dev/null || true
+            for attempt in {1..50}; do
+              kill -0 "$forward_pid" 2>/dev/null || break
+              sleep 0.2
+            done
+            kill -KILL "$forward_pid" 2>/dev/null || true
+            wait "$forward_pid" 2>/dev/null || true
+          }
+          trap stop_forward EXIT
           python3 test-infra/hack/bootstrap-apps-native-projects.py \
             --host-kubeconfig "$host" --host-context "kind-${CLUSTER_NAME}" \
             --milo-port 18443 --root-kubeconfig "$root" \
@@ -268,6 +310,11 @@ jobs:
           set -euo pipefail
           mkdir -p diagnostics/native
           if [[ -d "$PRIVATE_DIR" ]]; then
+            for evidence in milo-guard-upgrade.json apps-a1t-ownership-guard-evidence.json; do
+              if [[ -f "$PRIVATE_DIR/$evidence" ]]; then
+                cp -- "$PRIVATE_DIR/$evidence" diagnostics/native/
+              fi
+            done
             find "$PRIVATE_DIR" -maxdepth 1 -type f -name 'apps-a1t-native-evidence-*.json' \
               -exec cp -- '{}' diagnostics/native/ \;
             if [[ -f "$PRIVATE_DIR/apps-a1t-project-bootstrap-evidence.json" ]]; then
@@ -275,7 +322,11 @@ jobs:
                 diagnostics/native/project-bootstrap.json
             fi
           fi
-          if [[ -f test-infra/kubeconfig ]]; then
+          if [[ -f "$PRIVATE_DIR/kubeconfig-create-intent" &&
+                -f "$PRIVATE_DIR/kubeconfig-sha256" && -f test-infra/kubeconfig &&
+                ! -L test-infra/kubeconfig &&
+                "$(cat "$PRIVATE_DIR/kubeconfig-create-intent")" == "$CLUSTER_NAME" &&
+                "$(sha256sum test-infra/kubeconfig | cut -d ' ' -f 1)" == "$(cat "$PRIVATE_DIR/kubeconfig-sha256")" ]]; then
             kubectl --kubeconfig test-infra/kubeconfig --context "kind-${CLUSTER_NAME}" \
               get nodes,pods,deployments -A -o wide > diagnostics/native/cluster.txt 2>&1 || true
             kubectl --kubeconfig test-infra/kubeconfig --context "kind-${CLUSTER_NAME}" \
@@ -321,7 +372,17 @@ jobs:
               >> diagnostics/native/cleanup.txt
             failed=1
           fi
-          rm -f test-infra/kubeconfig
+          if [[ -e test-infra/kubeconfig || -L test-infra/kubeconfig ]]; then
+            if [[ -f "$PRIVATE_DIR/kubeconfig-create-intent" &&
+                  -f "$PRIVATE_DIR/kubeconfig-sha256" && ! -L test-infra/kubeconfig &&
+                  "$(cat "$PRIVATE_DIR/kubeconfig-create-intent")" == "$CLUSTER_NAME" &&
+                  "$(sha256sum test-infra/kubeconfig | cut -d ' ' -f 1)" == "$(cat "$PRIVATE_DIR/kubeconfig-sha256")" ]]; then
+              rm -f test-infra/kubeconfig
+            else
+              echo 'Retaining unproven or changed workspace kubeconfig' >> diagnostics/native/cleanup.txt
+              failed=1
+            fi
+          fi
           if [[ "$PRIVATE_DIR" == /tmp/apps-native-* ]]; then
             rm -rf -- "$PRIVATE_DIR"
           fi
