@@ -1,0 +1,28 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-native-a1t-host
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 10m
+  prune: true
+  dependsOn:
+  - name: apps-native-a1t-crds
+    namespace: milo-system
+  - name: apps-native-a1t-pending-api
+    namespace: milo-system
+  sourceRef:
+    kind: OCIRepository
+    name: apps-native-a1t
+    namespace: flux-system
+  path: ./config/experimental/pending-app-host
+  images:
+  - name: ghcr.io/datum-labs/apps
+    digest: sha256:7246924c7e551403e79098d1c88816ac6608853fef691589bb2cfa0b6400cce6
+  healthChecks:
+  - apiVersion: apps/v1
+    kind: Deployment
+    name: apps-controller
+    namespace: apps-system

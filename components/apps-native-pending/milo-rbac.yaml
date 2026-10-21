@@ -1,0 +1,153 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-pending-controller
+rules:
+- apiGroups:
+  - apps.miloapis.com
+  resources:
+  - apps
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+- apiGroups:
+  - apps.miloapis.com
+  resources:
+  - apps/status
+  verbs:
+  - update
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-pending-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-pending-controller
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: apps-a1t-native-project
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-pending-installer
+rules:
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - patch
+  - delete
+  resourceNames:
+  - apps.apps.miloapis.com
+  - apprevisions.apps.miloapis.com
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs:
+  - get
+  - patch
+  - delete
+  resourceNames:
+  - apps-internal-pending.apps.miloapis.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-pending-installer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-pending-installer
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: apps-a1t-native-installer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-pending-requester
+rules:
+- apiGroups:
+  - apps.miloapis.com
+  resources:
+  - apps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - apps.miloapis.com
+  resources:
+  - apps/status
+  verbs:
+  - update
+- apiGroups:
+  - apps.miloapis.com
+  resources:
+  - apprevisions
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-pending-requester
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-pending-requester
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: apps-a1t-pending-requester
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apps-a1t-pending-source-readers
+rules:
+- apiGroups:
+  - apps.miloapis.com
+  resources:
+  - apptemplates
+  - apptemplaterevisions
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: apps-a1t-pending-source-readers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apps-a1t-pending-source-readers
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: apps-a1t-pending-source-readers

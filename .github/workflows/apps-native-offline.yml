@@ -6,6 +6,10 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - components/apps-native-pending/**
+      - hack/apps_native_pending.py
+      - hack/apps_native_profiles.py
+      - hack/test_apps_native_pending.py
       - hack/apps_native_support.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
@@ -22,6 +26,10 @@ on:
       - .github/workflows/apps-native-offline.yml
       - Taskfile.yml
       - components/apps-native/**
+      - components/apps-native-pending/**
+      - hack/apps_native_pending.py
+      - hack/apps_native_profiles.py
+      - hack/test_apps_native_pending.py
       - hack/apps_native_support.py
       - hack/test-apps-native-authoring.py
       - hack/test_apps_native_harness.py
