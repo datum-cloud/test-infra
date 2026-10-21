@@ -20,7 +20,10 @@ The arm64 image labels identify the full Catalog commit and repository. The
 fixture checks the exact running Pod image ID as well as the Flux spec image.
 The diagnostic TLS Pod uses the pinned curl index
 `sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6`
-and mounts only a public CA ConfigMap; it has no service-account token.
+and mounts only a public CA ConfigMap; it has no service-account token. Its exact
+arm64 child declares the named `curl_user`; that image's `/etc/passwd` and
+`/etc/group` resolve the user to UID 101 and GID 102. The Pod sets those
+numeric IDs and keeps `runAsNonRoot: true`.
 
 The source overlay renders eight objects. The host Flux stage consumes the
 same OCI source and renders six: it omits the upstream Namespace and
@@ -56,7 +59,13 @@ host/CA stages, proves all selected manager Pods gone, restores the original
 four-user static auth with a fresh Milo API Pod rollout, and removes the
 scoped role, binding, Secret and sources by UID/resourceVersion. The exact
 task-created `services-system` Namespace is retained to avoid cascading
-deletion of foreign contents. An uncertain resource, foreign data, or partial
+deletion of foreign contents. A later run may pass
+`--retained-namespace-evidence-file` with the completed, signed prior run's
+private journal. It checks the original namespace UID and create intent,
+predecessor runs, and default-only contents among the listed resource kinds
+before reuse. This is not an exhaustive namespace purge proof. The new run
+does not claim or delete that namespace; its cleanup rechecks prior ownership and
+contents. An uncertain resource, foreign data, or partial
 Flux prune retains prerequisites and the private journal for recovery.
 If cert-manager creates a generated TLS Secret but the runner loses its UID
 before journaling it, cleanup retains that Secret and the CA prerequisites for
@@ -66,7 +75,7 @@ The runner accepts explicit `--host-kubeconfig`, `--host-context`,
 `--milo-kubeconfig`, `--milo-port`, and `--evidence-file`, plus paths to the
 retained installer, Catalog API, Catalog OCI, Locations, and LocationBinding
 evidence and the clean Catalog source and OCI manifest/layer. It has an
-overall bounded deadline. Its default mode is read-only; no current live
+overall bounded deadline. Its default mode is read-only; no successful live
 operator result is claimed by this document.
 
 Offline review commands:
@@ -77,10 +86,18 @@ kustomize build components/service-catalog/operator-ca
 python3 -m unittest discover -s hack -p 'test_apps_native_catalog_operator.py' -v
 ```
 
+The first local setup attempt reached the TLS diagnostic Pod, where kubelet
+rejected the image's nonnumeric default user under `runAsNonRoot`. The Pod never
+started, and its active deadline expired. Source-owned cleanup completed:
+operator stages, credentials, TLS objects and root RBAC were absent; the prior
+four-row auth value returned with no terminating Milo API Pod. The original
+sanitized failure report is retained in the private task evidence directory.
+The numeric image-user correction has not yet been exercised live.
+
 The clean external Catalog checkout and the cached exact OCI layer are needed
 for the full source/tree/Flux render gate. Local source verification has
 rendered exactly three CA and six host objects. The draft fixture has not yet
-been reviewed or executed against the live cluster. A nonpersisting server
+established operator readiness against the live cluster. A nonpersisting server
 dry-run of the no-token TLS probe Pod against the dedicated Kind API confirmed
 the exact Kubernetes default-field normalization used for lost-CREATE cleanup.
 Positive entitlement,

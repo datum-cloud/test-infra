@@ -57,6 +57,8 @@ SOURCE_ROLE = "services-controller-manager"
 CURL_IMAGE = "docker.io/curlimages/curl@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 CURL_ARM64 = "sha256:b949ec80877077def1544f0727d3e3101dd687fe20a5bf74997e557f7e3ac961"
 CURL_ARM64_CONFIG = "sha256:bf9e201037a037a4220fc74d1af89b82a8a692349e9af499fb9888de4a0c4470"
+CURL_RUN_AS_UID = 101  # curl_user in the exact ARM image's /etc/passwd
+CURL_RUN_AS_GID = 102  # curl_group in the exact ARM image's /etc/group
 TLS_PROBE_NAME = "apps-a1t-services-tls-probe"
 PUBLIC_CA_NAME = "apps-a1t-services-public-ca"
 ROWS = {
@@ -232,16 +234,82 @@ def baseline_webhooks(milo: Kube, rendered: list[dict], expected: dict | None = 
     return observed
 
 
-def absence_preflight(host: Kube, milo: Kube) -> None:
+def retained_namespace(commands: Commands, host: Kube, identity: dict,
+                       args: argparse.Namespace, revision: str,
+                       predecessors: dict, *, require_empty: bool = True) -> dict | None:
+    path = args.retained_namespace_evidence_file
+    namespace = host.optional("namespace", NAMESPACE)
+    if path is None:
+        require(namespace is None,
+                "existing services-system namespace requires exact prior cleanup journal")
+        return None
+    require(path.is_absolute() and namespace is not None,
+            "retained namespace requires an absolute prior journal and live object")
+    prior = read_journal(path)
+    prior_revision = prior.get("source_revision")
+    run_id = prior.get("run_id")
+    uid = namespace["metadata"].get("uid")
+    require(isinstance(prior_revision, str) and
+            re.fullmatch(r"[0-9a-f]{40}", prior_revision) is not None and
+            isinstance(run_id, str) and
+            re.fullmatch(r"[0-9a-f]{24}", run_id) is not None and
+            prior.get("cleanup") == "complete" and
+            prior.get("cleanup_errors") == [] and
+            prior.get("scope_identity") == identity and
+            prior.get("catalog_source") == SOURCE_REVISION and
+            prior.get("catalog_oci_digest") == OCI_DIGEST and
+            prior.get("predecessor_runs") == {
+                "catalog_api": predecessors["graph"]["run_id"],
+                "locations": predecessors["locations"]["run_id"],
+                "catalog_oci": predecessors["transition"]["run_id"],
+                "locationbinding": predecessors["locationbinding"]["run_id"]} and
+            prior.get("attempted", {}).get("namespace") == uid ==
+                prior.get("retained_namespace_uid") and
+            namespace["metadata"].get("labels", {}).get(RUN_LABEL) == run_id and
+            not namespace["metadata"].get("deletionTimestamp") and
+            not namespace["metadata"].get("ownerReferences"),
+            "retained services-system Namespace lacks completed exact-run ownership")
+    expected = {"apiVersion": "v1", "kind": "Namespace", "metadata": {
+        "name": NAMESPACE, "labels": {RUN_LABEL: run_id}}}
+    require(intent_digest(namespace) ==
+            prior.get("intents", {}).get("namespace") == intent_digest(expected),
+            "retained services-system Namespace differs from prior create intent")
+    commands.run("git", "-C", str(ROOT), "verify-commit", prior_revision,
+                 sensitive=True)
+    commands.run("git", "-C", str(ROOT), "merge-base", "--is-ancestor",
+                 prior_revision, revision)
+    if require_empty:
+        items = host.json("-n", NAMESPACE, "get",
+                          "all,configmaps,secrets,serviceaccounts,roles,rolebindings,"
+                          "networkpolicies,issuers,certificates,leases,poddisruptionbudgets")
+        require({(obj["kind"], obj["metadata"]["name"])
+                 for obj in items.get("items", [])} == {
+                     ("ConfigMap", "kube-root-ca.crt"),
+                     ("ServiceAccount", "default")},
+                "retained services-system Namespace contains nondefault objects")
+    return {"uid": uid, "run_id": run_id, "source_revision": prior_revision,
+            "prior_journal": str(path),
+            "prior_journal_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def absence_preflight(host: Kube, milo: Kube,
+                      reuse: dict | None = None) -> None:
     for key, (kind, name, namespace, _) in ROWS.items():
+        if key == "namespace":
+            continue
         cluster = milo if key in ("role", "binding") else host
         require(cluster.optional(kind, name, namespace) is None,
                 f"existing Catalog operator {key} blocks trial")
     for name, namespace in ((CA_STAGE, "flux-system"), (HOST_STAGE, "flux-system")):
         require(host.optional("kustomization", name, namespace) is None,
                 f"existing Catalog operator Flux stage {name} blocks trial")
-    require(host.optional("namespace", NAMESPACE) is None,
-            "existing services-system namespace blocks operator trial")
+    namespace = host.optional("namespace", NAMESPACE)
+    require((namespace is None and reuse is None) or
+            (namespace is not None and reuse is not None and
+             namespace["metadata"].get("uid") == reuse["uid"] and
+             namespace["metadata"].get("labels", {}).get(RUN_LABEL) ==
+                 reuse["run_id"]),
+            "services-system namespace differs from verified reuse intent")
     selected = host.json("get", "deployment,replicaset,pod,statefulset,daemonset,job,cronjob",
                          "-A", "-l", "control-plane=services")
     require(selected.get("items") == [], "existing Catalog manager workload blocks trial")
@@ -328,6 +396,8 @@ def probe_manifests(ca: bytes) -> tuple[dict, dict]:
            "spec": {"automountServiceAccountToken": False,
                     "restartPolicy": "Never", "activeDeadlineSeconds": 60,
                     "securityContext": {"runAsNonRoot": True,
+                                        "runAsUser": CURL_RUN_AS_UID,
+                                        "runAsGroup": CURL_RUN_AS_GID,
                                         "seccompProfile": {"type": "RuntimeDefault"}},
                     "containers": [{"name": "probe", "image": CURL_IMAGE,
                                     "imagePullPolicy": "IfNotPresent",
@@ -952,6 +1022,14 @@ def cleanup(host: Kube, milo: Kube, commands: Commands, args: argparse.Namespace
     require_same_identity(evidence["scope_identity"], identity)
     predecessors = cleanup_predecessors(commands, host, milo, identity,
                                         args, evidence, state)
+    reuse = evidence.get("namespace_reuse")
+    require((reuse is None) == (args.retained_namespace_evidence_file is None),
+            "Catalog cleanup retained Namespace evidence argument changed")
+    if reuse is not None:
+        require(retained_namespace(commands, host, identity, args,
+                                   evidence["source_revision"], predecessors,
+                                   require_empty=False) == reuse,
+                "Catalog reused Namespace prior evidence or UID changed")
     private = args.evidence_file.parent
     host_proxy = APIProxy(host, private, "catalog-operator-host")
     root_proxy = APIProxy(milo, private, "catalog-operator-root")
@@ -1062,6 +1140,11 @@ def cleanup(host: Kube, milo: Kube, commands: Commands, args: argparse.Namespace
             # Keep the exact task-owned Namespace. Cascading deletion requires a
             # separate exhaustive census and is outside this prerequisite.
             evidence["retained_namespace_uid"] = namespace["metadata"]["uid"]
+        if not errors and reuse is not None:
+            require(retained_namespace(commands, host, identity, args,
+                                       evidence["source_revision"], predecessors) == reuse,
+                    "Catalog reused Namespace did not return to exact default contents")
+            evidence["retained_namespace_uid"] = reuse["uid"]
     except Exception:
         errors.append("Catalog operator private cleanup transport or namespace check failed")
     finally:
@@ -1117,7 +1200,9 @@ def run(args: argparse.Namespace) -> None:
         return
     predecessors = preflight("retained-predecessors", lambda:
         exact_predecessors(commands, host, milo, identity, args, contracts))
-    preflight("resource-collisions", lambda: absence_preflight(host, milo))
+    reuse = preflight("namespace-reuse", lambda: retained_namespace(
+        commands, host, identity, args, revision, predecessors))
+    preflight("resource-collisions", lambda: absence_preflight(host, milo, reuse))
     preflight("catalog-webhooks", lambda:
         baseline_webhooks(milo, predecessors["oci"]["rendered"],
                           predecessors["locationbinding"].get("webhook_uids")))
@@ -1169,6 +1254,7 @@ def run(args: argparse.Namespace) -> None:
                     "locations": predecessors["locations"]["run_id"],
                     "catalog_oci": predecessors["transition"]["run_id"],
                     "locationbinding": predecessors["locationbinding"]["run_id"]},
+                "namespace_reuse": reuse,
                 "webhook_uids": baseline_webhooks(
                     milo, predecessors["oci"]["rendered"],
                     predecessors["locationbinding"].get("webhook_uids")),
@@ -1182,9 +1268,12 @@ def run(args: argparse.Namespace) -> None:
         atomic_json(args.evidence_file, evidence)
 
     try:
-        stage("owned-host-namespace")
-        create_owned(host, "namespace", direct_manifest("namespace", contracts),
-                     evidence, args.evidence_file)
+        if reuse is None:
+            stage("owned-host-namespace")
+            create_owned(host, "namespace", direct_manifest("namespace", contracts),
+                         evidence, args.evidence_file)
+        else:
+            stage("verified-retained-host-namespace")
         stage("static-auth-cas")
         state["auth_intent"] = True
         atomic_json(state_path, state)
@@ -1283,6 +1372,7 @@ def main() -> None:
     parser.add_argument("--catalog-oci-evidence-file", required=True, type=Path)
     parser.add_argument("--locations-evidence-file", required=True, type=Path)
     parser.add_argument("--locationbinding-evidence-file", required=True, type=Path)
+    parser.add_argument("--retained-namespace-evidence-file", type=Path)
     parser.add_argument("--catalog-source", required=True, type=Path)
     parser.add_argument("--catalog-oci-manifest", required=True, type=Path)
     parser.add_argument("--catalog-oci-layer", required=True, type=Path)

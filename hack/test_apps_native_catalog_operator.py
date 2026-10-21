@@ -1,6 +1,7 @@
 """Offline failure gates for the isolated, source-owned Catalog operator."""
 
 import base64
+import argparse
 import copy
 import csv
 import importlib.util
@@ -109,6 +110,9 @@ kubeconfigPath: /etc/milo/kubeconfig
         cm, pod = fixture.probe_manifests(ca)
         self.assertEqual(cm["data"], {"ca.crt": ca.decode()})
         self.assertFalse(pod["spec"]["automountServiceAccountToken"])
+        self.assertEqual(pod["spec"]["securityContext"], {
+            "runAsNonRoot": True, "runAsUser": 101, "runAsGroup": 102,
+            "seccompProfile": {"type": "RuntimeDefault"}})
         self.assertEqual(pod["spec"]["volumes"][0]["configMap"]["defaultMode"], 420)
         observed = copy.deepcopy(pod)
         observed["metadata"]["labels"] = {RUN_LABEL: "run"}
@@ -227,6 +231,74 @@ kubeconfigPath: /etc/milo/kubeconfig
             self.assertEqual(len(observed["intents"]["namespace"]), 64)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_retained_namespace_needs_exact_completed_signed_run_and_empty_scope(self):
+        old_run = "a" * 24
+        uid = "old-namespace-uid"
+        identity = {"task": "exact-dedicated-cluster"}
+        previous = {
+            "version": 1, "source_revision": "b" * 40,
+            "run_id": old_run, "cleanup": "complete", "cleanup_errors": [],
+            "scope_identity": identity,
+            "catalog_source": fixture.SOURCE_REVISION,
+            "catalog_oci_digest": fixture.OCI_DIGEST,
+            "predecessor_runs": {"catalog_api": "graph", "locations": "locations",
+                                 "catalog_oci": "transition", "locationbinding": "lb"},
+            "attempted": {"namespace": uid}, "retained_namespace_uid": uid}
+        predecessors = {"graph": {"run_id": "graph"},
+                        "locations": {"run_id": "locations"},
+                        "transition": {"run_id": "transition"},
+                        "locationbinding": {"run_id": "lb"}}
+        namespace = {"apiVersion": "v1", "kind": "Namespace", "metadata": {
+            "name": fixture.NAMESPACE, "uid": uid,
+            "labels": {RUN_LABEL: old_run, "kubernetes.io/metadata.name":
+                       fixture.NAMESPACE}}, "spec": {"finalizers": ["kubernetes"]}}
+        previous["intents"] = {"namespace": fixture.intent_digest(namespace)}
+        class Host:
+            def __init__(self): self.namespace = copy.deepcopy(namespace)
+            def optional(self, kind, name, namespace=None):
+                return self.namespace if kind == "namespace" else None
+            def json(self, *args):
+                if args[:2] == ("get", "deployment,replicaset,pod,statefulset,daemonset,job,cronjob"):
+                    return {"items": []}
+                return {"items": [{"kind": "ConfigMap", "metadata": {
+                    "name": "kube-root-ca.crt"}}, {"kind": "ServiceAccount",
+                    "metadata": {"name": "default"}}]}
+        class Git:
+            def __init__(self): self.calls = []
+            def run(self, *args, **_): self.calls.append(args); return ""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prior.json"
+            path.write_text(json.dumps(previous))
+            path.chmod(0o600)
+            args = argparse.Namespace(retained_namespace_evidence_file=path)
+            host, git = Host(), Git()
+            reuse = fixture.retained_namespace(git, host, identity, args,
+                                               "c" * 40, predecessors)
+            self.assertEqual(reuse["uid"], uid)
+            self.assertEqual([call[3] for call in git.calls],
+                             ["verify-commit", "merge-base"])
+            fixture.absence_preflight(host, Host(), reuse)
+            host.namespace["metadata"]["uid"] = "replacement"
+            with self.assertRaisesRegex(RuntimeError, "exact-run ownership"):
+                fixture.retained_namespace(git, host, identity, args,
+                                           "c" * 40, predecessors)
+            host.namespace = copy.deepcopy(namespace)
+            host.namespace["metadata"]["annotations"] = {"foreign": "change"}
+            with self.assertRaisesRegex(RuntimeError, "prior create intent"):
+                fixture.retained_namespace(git, host, identity, args,
+                                           "c" * 40, predecessors)
+            host.namespace = copy.deepcopy(namespace)
+            with mock.patch.object(host, "json", return_value={"items": [{
+                    "kind": "Secret", "metadata": {"name": "foreign"}}]}):
+                with self.assertRaisesRegex(RuntimeError, "nondefault objects"):
+                    fixture.retained_namespace(git, host, identity, args,
+                                               "c" * 40, predecessors)
+            previous["cleanup"] = "incomplete"
+            path.write_text(json.dumps(previous))
+            with self.assertRaisesRegex(RuntimeError, "exact-run ownership"):
+                fixture.retained_namespace(git, host, identity, args,
+                                           "c" * 40, predecessors)
+
     def test_auth_restore_restarts_even_after_lost_restore_reply(self):
         old, new = four_rows(), fixture.extended_auth(four_rows(), "b" * 96)
         class Host:
@@ -340,7 +412,8 @@ kubeconfigPath: /etc/milo/kubeconfig
             def close(self): pass
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "evidence.json"
-            args = type("Args", (), {"evidence_file": path})()
+            args = type("Args", (), {"evidence_file": path,
+                                     "retained_namespace_evidence_file": None})()
             with mock.patch.object(fixture, "cleanup_predecessors", return_value={}), \
                  mock.patch.object(fixture, "APIProxy", Proxy), \
                  mock.patch.object(fixture, "data_census"), \
