@@ -6,16 +6,20 @@ This module only speaks to Kubernetes APIs and Flux. It has no storage client.
 from __future__ import annotations
 
 import base64
+import copy
 from dataclasses import dataclass
 import hashlib
 import http.client
 import json
-import json
+import os
 from pathlib import Path
 import socket
 import ssl
 import subprocess
+import tempfile
 import time
+
+import yaml
 
 
 RUN_LABEL = "apps-a1t.datum.net/run-id"
@@ -275,6 +279,257 @@ class Owned:
                     f"refusing replacement {self.kind}/{self.name} after delete")
             return current is None
         wait_for(absent, f"{self.kind}/{self.name} absent after owned delete", timeout)
+
+def write_flux_journal(path: Path, state: dict) -> None:
+    """Atomic private journal; failure prevents the associated API mutation."""
+    require(path.is_absolute() and path.parent.is_dir() and not path.is_symlink(),
+            "absolute non-symlink Flux journal required")
+    fd, pending = tempfile.mkstemp(prefix=path.name + ".pending-", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as output:
+            json.dump(state, output, sort_keys=True, separators=(",", ":"))
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(pending, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(pending).unlink(missing_ok=True)
+
+
+def flux_inventory(rendered: list[dict]) -> frozenset[tuple[str, str]]:
+    """Flux v2.7.5 ResourceRef: namespace_name_group_kind plus API version.
+
+    Inputs must be the final source-owned render, including targetNamespace and
+    name transformations. No live inventory is ever used to expand this set.
+    """
+    require(isinstance(rendered, list) and 0 < len(rendered) <= 256,
+            "bounded nonempty source render required for Flux prune")
+    entries = set()
+    ids = set()
+    for obj in rendered:
+        api, kind, meta = obj.get("apiVersion", ""), obj.get("kind", ""), obj.get("metadata", {})
+        group, version = api.split("/", 1) if "/" in api else ("", api)
+        namespace, name = meta.get("namespace", ""), meta.get("name", "")
+        require(all(isinstance(v, str) and "_" not in v for v in (group, version, kind, namespace, name)) and
+                bool(version and kind and name) and not meta.get("generateName"),
+                "source render lacks an exact Flux inventory identity")
+        identity = f"{namespace}_{name}_{group}_{kind}"
+        require(identity not in ids, "duplicate or version-aliased source inventory identity")
+        ids.add(identity)
+        entries.add((identity, version))
+    return frozenset(entries)
+
+
+def _flux_spec(spec: dict) -> dict:
+    """Only the two defaults in the pinned Flux v2.7.5 v1 CRD schema."""
+    require(isinstance(spec, dict), "Flux spec must be an object")
+    out = copy.deepcopy(spec)
+    out.setdefault("force", False)
+    for ref in out.get("postBuild", {}).get("substituteFrom", []):
+        ref.setdefault("optional", False)
+    return out
+
+
+class FluxOwned(Owned):
+    """A narrowly typed Kustomization owner with bounded prune authority.
+
+    Spec checks are in addition to UID/RV DELETE, never a replacement. The
+    optional journal callback must atomically persist the supplied noncredential
+    intent before returning; a callback error prevents the next API mutation.
+    It receives public CA patches and reference names, never kubeconfig contents.
+    """
+    def __init__(self, kube: Kube, namespace: str, name: str,
+                 rendered: list[dict], revision: str, journal=None):
+        super().__init__(kube, namespace, "kustomization", name,
+                         f"/apis/kustomize.toolkit.fluxcd.io/v1/namespaces/{namespace}/kustomizations/{name}")
+        require(isinstance(revision, str) and bool(revision), "exact source artifact revision required")
+        self.allowed = flux_inventory(rendered)
+        self._rendered = copy.deepcopy(rendered)
+        self.revision, self.journal = revision, journal
+        self._initial = None
+        self._run_id = None
+        self._ca = None
+        self._ca_committed = False
+        self._delete_intent = False
+
+    def _capture(self, manifest: dict, run_id: str) -> dict:
+        obj = copy.deepcopy(manifest)
+        meta = obj.setdefault("metadata", {})
+        meta.setdefault("labels", {})[RUN_LABEL] = run_id
+        require(obj.get("apiVersion") == "kustomize.toolkit.fluxcd.io/v1" and
+                obj.get("kind") == "Kustomization" and
+                meta.get("name") == self.name and meta.get("namespace") == self.namespace and
+                set(obj) == {"apiVersion", "kind", "metadata", "spec"} and
+                set(meta) <= {"name", "namespace", "labels", "annotations"} and
+                obj["spec"].get("prune") is True and isinstance(run_id, str) and bool(run_id),
+                "exact independent source-owned pruning Kustomization required")
+        require(len(json.dumps(obj)) <= 1024 * 1024, "Flux intent exceeds bounded size")
+        obj["spec"] = _flux_spec(obj["spec"])
+        return obj
+
+    def recovery_state(self) -> dict:
+        return copy.deepcopy({"version": 1, "run_id": self._run_id, "initial": self._initial,
+                              "inventory": [list(x) for x in sorted(self.allowed)], "revision": self.revision,
+                              "uid": self.uid, "intent": self.intent, "delete_intent": self._delete_intent,
+                              "ca_bundle": self._ca, "ca_committed": self._ca_committed})
+
+    def _record(self):
+        if self.journal is not None:
+            self.journal(self.recovery_state())
+
+    def recover(self, manifest: dict, run_id: str, saved: dict) -> None:
+        """Restore only an intent bound to a newly verified original source render."""
+        require(not self.intent and self._initial is None, "Flux owner is already initialized")
+        initial = self._capture(manifest, run_id)
+        require(set(saved) == {"version", "run_id", "initial", "inventory", "revision", "uid", "intent",
+                               "delete_intent", "ca_bundle", "ca_committed"} and
+                saved["version"] == 1 and saved["run_id"] == run_id and saved["initial"] == initial and
+                saved["inventory"] == [list(x) for x in sorted(self.allowed)] and saved["revision"] == self.revision and
+                saved["intent"] is True and type(saved["delete_intent"]) is bool and type(saved["ca_committed"]) is bool and
+                (saved["uid"] is None or isinstance(saved["uid"], str) and bool(saved["uid"])) and
+                (not saved["delete_intent"] or saved["uid"]),
+                "Flux recovery journal differs from source-owned intent")
+        self._initial, self._run_id = initial, run_id
+        self._ca = saved["ca_bundle"]
+        if self._ca is not None:
+            self._ca_spec(self._ca)  # validates exact supported transition
+        require(self._ca is not None or saved["ca_committed"] is False, "invalid Flux CA recovery phase")
+        self._ca_committed = saved["ca_committed"]
+        self.uid, self.intent, self._delete_intent = saved["uid"], True, saved["delete_intent"]
+
+    def create(self, manifest: dict, run_id: str, *, sensitive: bool = False) -> dict:
+        require(not self.intent and self._initial is None, "Flux create intent already exists")
+        self._initial, self._run_id = self._capture(manifest, run_id), run_id
+        self.intent = True
+        self._record()
+        obj = self.kube.create(copy.deepcopy(self._initial), self.namespace, sensitive=sensitive)
+        self.uid = self._validate(obj, run_id)
+        self._record()
+        return obj
+
+    def _ca_spec(self, bundle: str) -> dict:
+        require(isinstance(bundle, str) and 0 < len(bundle) <= 131072,
+                "bounded public CA bundle required")
+        try:
+            decoded = base64.b64decode(bundle, validate=True)
+        except (ValueError, TypeError):
+            raise RuntimeError("public CA bundle encoding invalid") from None
+        require(decoded.startswith(b"-----BEGIN CERTIFICATE-----") and
+                b"PRIVATE KEY" not in decoded and len(decoded) <= 65536,
+                "only a bounded public certificate bundle may be bound")
+        require(not self._initial["spec"].get("patches"), "CA transition requires an initially unpatched API stage")
+        hooks = [o for o in self._rendered if o.get("apiVersion") == "admissionregistration.k8s.io/v1" and
+                 o.get("kind") in ("MutatingWebhookConfiguration", "ValidatingWebhookConfiguration")]
+        require(bool(hooks), "CA transition requires source-rendered webhook configurations")
+        patches = []
+        for obj in hooks:
+            require(obj.get("webhooks") and all(isinstance(h.get("clientConfig", {}).get("service"), dict) and
+                    "url" not in h["clientConfig"] and not h["clientConfig"].get("caBundle") for h in obj["webhooks"]),
+                    "CA transition requires initially unbound source Service webhooks")
+            steps = [{"op": "add", "path": f"/webhooks/{i}/clientConfig/caBundle", "value": bundle}
+                     for i in range(len(obj["webhooks"]))]
+            patches.append({"target": {"kind": obj["kind"], "name": obj["metadata"]["name"]},
+                            "patch": yaml.safe_dump(steps, sort_keys=False)})
+        result = copy.deepcopy(self._initial["spec"])
+        result["patches"] = patches
+        return result
+
+    def _validate(self, obj: dict, run_id: str) -> str:
+        require(self.intent and self._initial is not None and self._run_id == run_id,
+                "missing exact Flux create intent")
+        meta = obj.get("metadata", {})
+        expected = self._initial["metadata"]
+        require(obj.get("apiVersion") == self._initial["apiVersion"] and obj.get("kind") == "Kustomization" and
+                set(obj) <= {"apiVersion", "kind", "metadata", "spec", "status"} and
+                meta.get("name") == self.name and meta.get("namespace") == self.namespace and
+                isinstance(meta.get("uid"), str) and bool(meta["uid"]) and bool(meta.get("resourceVersion")) and
+                (self.uid is None or meta["uid"] == self.uid) and not meta.get("ownerReferences") and
+                set(meta) <= {"name", "namespace", "uid", "resourceVersion", "generation", "creationTimestamp",
+                              "managedFields", "labels", "annotations", "finalizers", "ownerReferences",
+                              "deletionTimestamp", "deletionGracePeriodSeconds"} and
+                (not meta.get("deletionTimestamp") or self._delete_intent and self.uid == meta["uid"]) and
+                meta.get("labels", {}) == expected.get("labels", {}) and
+                meta.get("finalizers", []) in ([], ["finalizers.fluxcd.io"]),
+                "Flux identity/lifecycle metadata differs from exact intent")
+        annotations = copy.deepcopy(meta.get("annotations", {}))
+        marker = "reconcile.fluxcd.io/requestedAt"
+        if marker in annotations and marker not in expected.get("annotations", {}):
+            value = annotations.pop(marker)
+            require(isinstance(value, str) and len(value) <= 128, "Flux reconcile annotation invalid")
+        require(annotations == expected.get("annotations", {}), "Flux annotations differ from exact intent")
+        allowed_specs = [] if self._ca_committed else [self._initial["spec"]]
+        if self._ca is not None:
+            allowed_specs.append(self._ca_spec(self._ca))
+        require(_flux_spec(obj.get("spec")) in allowed_specs, "Flux source/path/target/spec drift blocks prune")
+        status = obj.get("status", {})
+        require(isinstance(status, dict), "Flux status unavailable")
+        for field in ("lastAppliedRevision", "lastAttemptedRevision"):
+            require(field not in status or status[field] == self.revision,
+                    "Flux observed a different source artifact revision")
+        inventory = status.get("inventory", {"entries": []})
+        require(isinstance(inventory, dict) and set(inventory) == {"entries"} and
+                isinstance(inventory["entries"], list) and len(inventory["entries"]) <= len(self.allowed),
+                "Flux inventory is malformed or exceeds source-owned render")
+        found = set()
+        for entry in inventory["entries"]:
+            require(isinstance(entry, dict) and set(entry) == {"id", "v"} and
+                    isinstance(entry["id"], str) and isinstance(entry["v"], str), "Flux inventory entry malformed")
+            identity = (entry["id"], entry["v"])
+            require(identity in self.allowed and identity not in found,
+                    "foreign, aliased or duplicate Flux inventory blocks prune")
+            found.add(identity)
+        return meta["uid"]
+
+    def bind_webhook_ca(self, private: Path, ca: bytes) -> dict:
+        """Only supported spec transition; lost replies accept exact before/after.
+
+        Caller must verify the serving certificate chain/SAN before this method.
+        No arbitrary patches, references or inventory may enter via this API.
+        """
+        require(self.intent and not self._delete_intent, "active Flux stage required for CA binding")
+        bundle = base64.b64encode(ca).decode()
+        target = self._ca_spec(bundle)
+        require(self._ca in (None, bundle), "different CA transition already recorded")
+        current = self.kube.optional(self.kind, self.name, self.namespace)
+        require(current is not None, "Flux CA stage is absent")
+        self.uid = self._validate(current, self._run_id)
+        self._ca = bundle
+        self._record()  # exact before/after plus recovered UID precedes PATCH
+        if _flux_spec(current["spec"]) != target:
+            current = self.kube.patch_json(private, self.kind, self.name, [
+                {"op": "test", "path": "/metadata/uid", "value": self.uid},
+                {"op": "test", "path": "/metadata/resourceVersion", "value": current["metadata"]["resourceVersion"]},
+                {"op": "test", "path": "/spec", "value": current["spec"]},
+                {"op": "add", "path": "/spec/patches", "value": target["patches"]}], self.namespace)
+        self._validate(current, self._run_id)
+        require(_flux_spec(current["spec"]) == target, "Flux CA response did not contain exact target")
+        self._ca_committed = True
+        self._record()
+        return current
+
+    def delete(self, proxy: APIProxy, run_id: str, timeout: float = 120) -> None:
+        if not self.intent:
+            return
+        obj = self.kube.optional(self.kind, self.name, self.namespace)
+        if obj is None:
+            return
+        self.uid = self._validate(obj, run_id)
+        self._delete_intent = True
+        self._record()  # persists recovered UID and delete intent before DELETE
+        meta = obj["metadata"]
+        proxy.delete(self.path, self.uid, meta["resourceVersion"])
+        def absent():
+            current = self.kube.optional(self.kind, self.name, self.namespace)
+            if current is None:
+                return True
+            self._validate(current, run_id)
+            return False
+        wait_for(absent, f"validated Flux Kustomization/{self.name} absent", timeout)
 
 
 class HeldLease(Owned):
