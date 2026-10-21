@@ -66,6 +66,25 @@ contract, including the absence of a remote `kubeConfig`; the rendered chart
 resources are validated against Kubernetes schemas. Schema retrieval may
 need network access on a fresh machine.
 
+## First execution and validator correction
+
+The first signed `08500ee7db603f1dc85847522f6631be67524050` trial on
+2026-10-21 created its member, then stopped at the module-mount preflight.
+KVM was present and Docker reported the modules bind read-only, but the node's
+`/lib` symlink made the effective mountpoint `/usr/lib/modules`. The old check
+searched only `/lib/modules`. No Flux, Kata or guest resources were installed.
+The original signed helper subsequently removed the exact recorded member;
+the host remained Ready. The failure journal is retained separately from any
+retry, which must use a new private evidence directory.
+
+The same source's offline CI passed its focused tests but failed the final
+schema validator. CI pins kubeconform v0.6.7, whose local schema reader treats
+`file://` as a literal path; the initial local check used v0.7.0, which accepted
+the URI. The checker now supplies an absolute filesystem path, and reports
+bounded validator errors for its public manifests. Both versions validate
+the two Flux resources with zero errors or skips. The full offline task also
+passes with CI's exact v0.6.7. These corrections do not establish guest boot.
+
 ## Proposed execution sequence
 
 Choose exact names for the existing dedicated VZ profile and host cluster.
@@ -105,7 +124,8 @@ Only the same command with `--execute` creates the new member. Before creating
 Kind it fsyncs a private creation intent. Immediately after `kind create`, it
 records the exact member node container ID; after the API responds it also
 records the member Node UID before installing Flux or Kata. It verifies
-`/dev/kvm` and read-only `/lib/modules` inside the member node, waits for local
+`/dev/kvm` and the effective read-only `/lib/modules` mount inside the member node,
+resolving a possible `/lib` to `/usr/lib` alias before checking mountinfo, then waits for local
 Flux, the pinned Kata HelmRelease and DaemonSet, and checks that the real
 RuntimeClass handler is `kata-qemu`.
 

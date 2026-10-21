@@ -99,6 +99,22 @@ class SmokeContractTests(unittest.TestCase):
         with self.assertRaisesRegex(smoke.PreflightError, "immutable container ID"):
             smoke.docker_member_exec_args(MEMBER + "-control-plane", "sh", "-ec", "true")
 
+    def test_member_modules_mount_uses_resolved_path_and_requires_ro(self) -> None:
+        # Ubuntu's /lib alias resolves to /usr/lib, the actual Kind mountpoint
+        # observed in the dedicated VZ member on 2026-10-21.
+        ro = ("2820 2778 253:1 /usr/lib/modules /usr/lib/modules ro,relatime "
+              "shared:455 - ext4 /dev/root rw,discard")
+        smoke.verify_readonly_modules_mount(ro, "/usr/lib/modules")
+        with self.assertRaisesRegex(smoke.PreflightError, "not mounted read-only"):
+            smoke.verify_readonly_modules_mount(ro, "/lib/modules")
+        with self.assertRaisesRegex(smoke.PreflightError, "not mounted read-only"):
+            smoke.verify_readonly_modules_mount(ro.replace(" ro,relatime", " rw,relatime"),
+                                                "/usr/lib/modules")
+        with self.assertRaisesRegex(smoke.PreflightError, "not mounted read-only"):
+            smoke.verify_readonly_modules_mount(ro + "\n" + ro, "/usr/lib/modules")
+        with self.assertRaisesRegex(smoke.PreflightError, "observation is invalid"):
+            smoke.verify_readonly_modules_mount(ro, "../usr/lib/modules")
+
     def test_host_evidence_requires_matching_profile_cluster_and_private_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = write_host_evidence(Path(tmp))

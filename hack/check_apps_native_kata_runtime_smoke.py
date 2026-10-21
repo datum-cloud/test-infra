@@ -20,8 +20,10 @@ from run_apps_native_kata_runtime_smoke import COMPONENT, PreflightError, load_l
 
 def checked_command(argv: list[str], timeout: int = 90) -> str:
     result = subprocess.run(argv, text=True, capture_output=True, check=False, timeout=timeout)
+    # This checker consumes only public pinned manifests and registry metadata.
+    # Keep validator diagnostics bounded, but do not hide the schema error.
     require(result.returncode == 0,
-            f"{Path(argv[0]).name} failed; captured output is suppressed for safety")
+            f"{Path(argv[0]).name} failed: {(result.stderr or result.stdout)[-8192:]}")
     return result.stdout
 
 
@@ -150,7 +152,10 @@ def validate_flux_crs(rendered: str, docs: list[dict]) -> int:
             directory.mkdir(exist_ok=True)
             (directory / f"{kind.lower()}_{version}.json").write_text(
                 json.dumps(schema, sort_keys=True), encoding="utf-8")
-        location = f"file://{root}/{{{{.Group}}}}/{{{{.ResourceKind}}}}_{{{{.ResourceAPIVersion}}}}.json"
+        # v0.6.7 interprets local schema locations as filesystem paths and does
+        # not strip a file:// URI prefix. Plain absolute paths work in both the
+        # CI-pinned validator and newer local versions.
+        location = f"{root}/{{{{.Group}}}}/{{{{.ResourceKind}}}}_{{{{.ResourceAPIVersion}}}}.json"
         result = checked_command(["kubeconform", "-strict", "-summary", "-kubernetes-version", "1.33.0",
                                  "-schema-location", location, str(manifest)], timeout=90).strip()
         counts = parse_kubeconform_summary(result, 2)
