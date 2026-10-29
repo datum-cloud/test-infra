@@ -1,0 +1,28 @@
+name: ensure-repo-test
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened]
+
+  push:
+    branches:
+      - main
+
+jobs:
+  ensure-repo:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Task
+        uses: arduino/setup-task@v3.0.0
+        with:
+          version: 3.x
+          repo-token: ${{ github.token }}
+
+      - name: Test the ensure-repo task
+        run: bash hack/ensure-repo.test.sh
