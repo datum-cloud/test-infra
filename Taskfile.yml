@@ -41,12 +41,18 @@ tasks:
     cmds:
       - |
         if [ "{{.REPO_DIR}}" != "." ]; then
-          if [ ! -d "{{.REPO_DIR}}" ]; then
+          # Clone into a missing or empty directory. Update only a test-infra clone rooted at the directory itself: in
+          # any other directory git would act on the repository that encloses it, and check out REPO_REF there.
+          if [ ! -d "{{.REPO_DIR}}" ] || [ -z "$(ls -A "{{.REPO_DIR}}")" ]; then
             echo "📦 Cloning test-infra repository to {{.REPO_DIR}}..."
             git clone {{.REPO_URL}} {{.REPO_DIR}}
             cd {{.REPO_DIR}}
             git checkout {{.REPO_REF}}
             echo "✅ Repository cloned successfully (ref: {{.REPO_REF}})"
+          elif [ "$(git -C "{{.REPO_DIR}}" rev-parse --show-cdup 2>/dev/null || echo outside)" != "" ] ||
+               [ ! -f "{{.REPO_DIR}}/cluster/kind-config.yaml" ] || [ ! -f "{{.REPO_DIR}}/components/flux/kustomization.yaml" ]; then
+            echo "❌ {{.REPO_DIR}} exists but is not a test-infra clone; move it aside and run again"
+            exit 1
           else
             echo "✅ Repository already exists at {{.REPO_DIR}}"
             cd {{.REPO_DIR}}
