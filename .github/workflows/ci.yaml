@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: datum-cloud/actions/.github/workflows/ci-basic.yaml@v1.26.0
+    with:
+      run: |
+        shellcheck --severity=warning hack/*.sh
+        find . -name kustomization.yaml -exec dirname {} \; | xargs -n1 kubectl kustomize > /dev/null
