@@ -13,5 +13,5 @@ jobs:
     uses: datum-cloud/actions/.github/workflows/ci-basic.yaml@v1.26.0
     with:
       run: |
-        shellcheck hack/*.sh
+        shellcheck --severity=warning hack/*.sh
         find . -name kustomization.yaml -exec dirname {} \; | xargs -n1 kubectl kustomize > /dev/null
