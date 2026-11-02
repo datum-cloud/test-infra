@@ -216,6 +216,8 @@ task test-infra:k9s                     # Launch k9s terminal UI
 
 **Permissions** – tools are installed to system directories and may require sudo privileges.
 
+**Loading images on Docker 29** – Docker 29 turns on its containerd image store by default, and `task kind-load-image` can then fail with `content digest … not found` for a multi-platform image. See kind's [Known Issues](https://kind.sigs.k8s.io/docs/user/known-issues/#unable-to-kind-load-docker-images) for the workarounds.
+
 **Cluster interaction** – use the wrapper commands for automatic kubeconfig handling:
 - `task kubectl -- <args>` / `task test-infra:kubectl -- <args>` - Run kubectl commands
 - `task k9s` / `task test-infra:k9s` - Launch k9s terminal UI for interactive cluster browsing

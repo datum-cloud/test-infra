@@ -19,6 +19,25 @@ jobs:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
 
+      # The images below are multi-platform. Docker 29's containerd image store keeps only the host's platform of them,
+      # so `kind load docker-image` fails on the missing blobs (kubernetes-sigs/kind#3795). kind's Known Issues names
+      # turning the store off: https://kind.sigs.k8s.io/docs/user/known-issues/#unable-to-kind-load-docker-images
+      # It is done here, in this repository's own job, and not in the shared kind-bootstrap action, because a caller may
+      # prepare images in the store before it calls the action, and a restart into another store would hide them.
+      - name: Use Docker's classic image store
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /etc/docker
+          cfg='{}'
+          if sudo test -s /etc/docker/daemon.json; then cfg=$(sudo cat /etc/docker/daemon.json); fi
+          echo "$cfg" | jq '.features["containerd-snapshotter"] = false' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo systemctl restart docker
+          docker info --format 'Docker storage: {{ .Driver }} {{ .DriverStatus }}'
+          if docker info --format '{{ .DriverStatus }}' | grep -q io.containerd.snapshotter; then
+            echo "the containerd image store is still on"
+            exit 1
+          fi
+
       - name: Bootstrap KIND cluster
         id: bootstrap
         uses: ./.github/actions/kind-bootstrap
