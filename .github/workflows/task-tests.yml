@@ -1,4 +1,4 @@
-name: ensure-repo-test
+name: task-tests
 on:
   pull_request:
     branches: [ main ]
@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  ensure-repo:
+  hack-tests:
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,5 +24,10 @@ jobs:
           version: 3.x
           repo-token: ${{ github.token }}
 
-      - name: Test the ensure-repo task
-        run: bash hack/ensure-repo.test.sh
+      - name: Run every task test in hack/
+        run: |
+          set -euo pipefail
+          for t in hack/*.test.sh; do
+            echo "== $t"
+            bash "$t"
+          done
