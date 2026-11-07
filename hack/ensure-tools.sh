@@ -82,6 +82,16 @@ install_flux() {
   fi
 }
 
+install_helm() {
+  if ! command -v helm &>/dev/null; then
+    echo "Installing helm..."
+    case "$OS" in
+      darwin|linux) curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash ;;
+      msys*|mingw*|cygwin*) choco install kubernetes-helm -y || winget install Helm.Helm ;;
+    esac
+  fi
+}
+
 for tool in "${TOOLS[@]}"; do
   install_${tool} || true
 done

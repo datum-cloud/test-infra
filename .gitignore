@@ -7,3 +7,7 @@
 *.tgz
 # Well known location for the kubeconfig to use talk to the test-infra cluster.
 kubeconfig
+# Federation kubeconfig bundle (hub/member/karmada configs + federation.env)
+kubeconfigs/
+# Repo-local pinned tools (e.g. karmadactl)
+bin/

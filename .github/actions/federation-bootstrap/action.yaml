@@ -1,0 +1,128 @@
+name: federation-bootstrap
+description: >
+  Stand up a Karmada federation topology (hub kind cluster + N member kind
+  clusters, joined and labeled) and expose the kubeconfig bundle. Any Datum
+  service e2e that needs a hub + members gets it from one action. Unlike
+  kind-bootstrap this does NOT set KUBECONFIG in the environment — there is no
+  single sensible default among the hub / karmada / member kubeconfigs; consume
+  the emitted outputs instead.
+
+# ---------- inputs ----------
+inputs:
+  hub_cluster:
+    description: "kind cluster name hosting the Karmada control plane (the hub)"
+    required: false
+    default: federation-hub
+  members:
+    description: >
+      Space-separated `<name>[=<label>]` member entries (newlines tolerated),
+      e.g. "compute-pop-dfw=dfw compute-pop-ord=ord".
+    required: true
+  member_label_key:
+    description: "Label key applied to each member carrying its label value"
+    required: false
+    default: topology.datum.net/city-code
+  karmada_api_nodeport:
+    description: "NodePort + host port for the Karmada apiserver"
+    required: false
+    default: "32443"
+  karmada_version:
+    description: "Karmada Helm chart version (empty ⇒ Taskfile default)"
+    required: false
+    default: ""
+  wait_timeout:
+    description: "Timeout for shorter waits such as member Ready (e.g. 300s, 5m)"
+    required: false
+    default: "300s"
+  karmada_wait_timeout:
+    description: "Timeout for Karmada install/converge waits (e.g. 10m)"
+    required: false
+    default: "10m"
+  ref:
+    description: >
+      test-infra ref to check out. Empty ⇒ github.action_ref, so the inner
+      checkout matches the pin on the `uses:` line.
+    required: false
+    default: ""
+  images:
+    description: "Space-separated images to load into the hub + all members (optional)"
+    required: false
+    default: ""
+
+# ---------- outputs ----------
+outputs:
+  kubeconfig_dir:
+    description: "Directory holding the federation kubeconfig bundle"
+    value: ${{ steps.emit.outputs.kubeconfig_dir }}
+  hub_kubeconfig:
+    description: "Host-side kubeconfig for the hub cluster"
+    value: ${{ steps.emit.outputs.hub_kubeconfig }}
+  karmada_kubeconfig:
+    description: "Karmada apiserver kubeconfig (localhost:NodePort)"
+    value: ${{ steps.emit.outputs.karmada_kubeconfig }}
+  karmada_internal_kubeconfig:
+    description: "Karmada apiserver kubeconfig (docker-bridge IP:NodePort)"
+    value: ${{ steps.emit.outputs.karmada_internal_kubeconfig }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout test-infra
+      uses: actions/checkout@v6
+      with:
+        repository: datum-cloud/test-infra
+        path: test-infra
+        ref: ${{ inputs.ref != '' && inputs.ref || github.action_ref }}
+
+    - name: Install Task
+      uses: arduino/setup-task@v2
+      with:
+        version: 3.x
+        repo-token: ${{ github.token }}
+
+    - name: Stand up federation topology
+      shell: bash
+      working-directory: test-infra
+      run: |
+        # Newlines in the members input are tolerated: fold them to spaces.
+        MEMBERS=$(printf '%s' "${{ inputs.members }}" | tr '\n' ' ')
+        # Only pass KARMADA_VERSION when set: Task treats a CLI-provided empty
+        # value as authoritative and skips the Taskfile's `| default`, so passing
+        # an empty string here would zero out the chart + karmadactl versions.
+        VERSION_ARG=()
+        if [ -n "${{ inputs.karmada_version }}" ]; then
+          VERSION_ARG=(KARMADA_VERSION="${{ inputs.karmada_version }}")
+        fi
+        task federation-up \
+          FEDERATION_HUB_CLUSTER="${{ inputs.hub_cluster }}" \
+          FEDERATION_MEMBERS="$MEMBERS" \
+          FEDERATION_MEMBER_LABEL_KEY="${{ inputs.member_label_key }}" \
+          KARMADA_API_NODEPORT="${{ inputs.karmada_api_nodeport }}" \
+          WAIT_TIMEOUT="${{ inputs.wait_timeout }}" \
+          KARMADA_WAIT_TIMEOUT="${{ inputs.karmada_wait_timeout }}" \
+          "${VERSION_ARG[@]}"
+
+    - name: Load images into hub + members
+      if: ${{ inputs.images != '' }}
+      shell: bash
+      working-directory: test-infra
+      run: |
+        MEMBERS=$(printf '%s' "${{ inputs.members }}" | tr '\n' ' ')
+        IMG_LIST=$(printf '%s' "${{ inputs.images }}" | tr '\n' ' ')
+        task federation-load-image \
+          FEDERATION_HUB_CLUSTER="${{ inputs.hub_cluster }}" \
+          FEDERATION_MEMBERS="$MEMBERS" \
+          IMAGES="$IMG_LIST"
+
+    - id: emit
+      name: Export kubeconfig paths
+      shell: bash
+      working-directory: test-infra
+      run: |
+        DIR="$PWD/kubeconfigs/federation"
+        {
+          echo "kubeconfig_dir=$DIR"
+          echo "hub_kubeconfig=$DIR/${{ inputs.hub_cluster }}.yaml"
+          echo "karmada_kubeconfig=$DIR/karmada.yaml"
+          echo "karmada_internal_kubeconfig=$DIR/karmada-internal.yaml"
+        } >> "$GITHUB_OUTPUT"

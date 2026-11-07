@@ -1,0 +1,165 @@
+name: federation-topology-test
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+  federation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    env:
+      HUB: dogfood-hub
+      # Two members exercises the join loop and both label paths.
+      MEMBERS: dogfood-member-a=dfw dogfood-member-b=ord
+
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0 }
+
+      - name: Stand up federation topology
+        id: fed
+        uses: ./.github/actions/federation-bootstrap
+        with:
+          hub_cluster: dogfood-hub
+          members: ${{ env.MEMBERS }}
+          # Dogfood the Taskfile at THIS commit, not test-infra's default branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert both members are Ready
+        run: |
+          set -euo pipefail
+          KARMADA="${{ steps.fed.outputs.karmada_kubeconfig }}"
+          for m in dogfood-member-a dogfood-member-b; do
+            kubectl --kubeconfig "$KARMADA" wait --for=condition=Ready \
+              "cluster/$m" --timeout=120s
+            echo "✅ $m is Ready"
+          done
+
+      - name: Assert city-code labels
+        run: |
+          set -euo pipefail
+          KARMADA="${{ steps.fed.outputs.karmada_kubeconfig }}"
+          check() {
+            local cluster="$1" want="$2"
+            got=$(kubectl --kubeconfig "$KARMADA" get cluster "$cluster" \
+              -o jsonpath='{.metadata.labels.topology\.datum\.net/city-code}')
+            if [ "$got" != "$want" ]; then
+              echo "❌ $cluster city-code=[$got], expected [$want]"; exit 1
+            fi
+            echo "✅ $cluster labeled city-code=$got"
+          }
+          check dogfood-member-a dfw
+          check dogfood-member-b ord
+
+      - name: PropagationPolicy round-trip (dfw only)
+        run: |
+          set -euo pipefail
+          KARMADA="${{ steps.fed.outputs.karmada_kubeconfig }}"
+          DIR="${{ steps.fed.outputs.kubeconfig_dir }}"
+          MEMBER_A="$DIR/dogfood-member-a.yaml"
+          MEMBER_B="$DIR/dogfood-member-b.yaml"
+
+          # A ConfigMap plus a PropagationPolicy that targets only members labeled
+          # city-code=dfw (member-a). This is the one assertion that proves the
+          # patched member Secret + apiEndpoint actually carry traffic — Karmada
+          # can only place the object if it can reach member-a's API server.
+          kubectl --kubeconfig "$KARMADA" apply -f - <<'EOF'
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: dogfood-cm
+            namespace: default
+          data:
+            hello: federation
+          ---
+          apiVersion: policy.karmada.io/v1alpha1
+          kind: PropagationPolicy
+          metadata:
+            name: dogfood-cm
+            namespace: default
+          spec:
+            resourceSelectors:
+              - apiVersion: v1
+                kind: ConfigMap
+                name: dogfood-cm
+            placement:
+              clusterAffinity:
+                labelSelector:
+                  matchLabels:
+                    topology.datum.net/city-code: dfw
+          EOF
+
+          echo "⏳ Waiting for dogfood-cm to land on member-a (dfw)..."
+          for i in $(seq 1 30); do
+            if kubectl --kubeconfig "$MEMBER_A" -n default get configmap dogfood-cm >/dev/null 2>&1; then
+              echo "✅ dogfood-cm present on member-a"; break
+            fi
+            [ "$i" = "30" ] && { echo "❌ dogfood-cm never propagated to member-a"; exit 1; }
+            sleep 5
+          done
+
+          # member-b (ord) must NOT receive it — proves label-scoped placement.
+          if kubectl --kubeconfig "$MEMBER_B" -n default get configmap dogfood-cm >/dev/null 2>&1; then
+            echo "❌ dogfood-cm unexpectedly present on member-b (ord)"; exit 1
+          fi
+          echo "✅ dogfood-cm absent on member-b, as expected"
+
+          # Delete and confirm it is withdrawn from member-a.
+          kubectl --kubeconfig "$KARMADA" delete configmap dogfood-cm -n default
+          kubectl --kubeconfig "$KARMADA" delete propagationpolicy dogfood-cm -n default
+          echo "⏳ Waiting for dogfood-cm to be withdrawn from member-a..."
+          for i in $(seq 1 30); do
+            if ! kubectl --kubeconfig "$MEMBER_A" -n default get configmap dogfood-cm >/dev/null 2>&1; then
+              echo "✅ dogfood-cm withdrawn from member-a"; break
+            fi
+            [ "$i" = "30" ] && { echo "❌ dogfood-cm never withdrawn from member-a"; exit 1; }
+            sleep 5
+          done
+
+      - name: Federation status
+        run: |
+          cd test-infra
+          task federation-status \
+            FEDERATION_HUB_CLUSTER=dogfood-hub \
+            FEDERATION_MEMBERS="${{ env.MEMBERS }}"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          set +e
+          mkdir -p /tmp/fed-diagnostics
+          for c in dogfood-hub dogfood-member-a dogfood-member-b; do
+            kind export logs --name "$c" "/tmp/fed-diagnostics/$c" 2>&1 || true
+          done
+          KARMADA="${{ steps.fed.outputs.karmada_kubeconfig }}"
+          HUB="${{ steps.fed.outputs.hub_kubeconfig }}"
+          kubectl --kubeconfig "$HUB" -n karmada-system get pods -o wide \
+            > /tmp/fed-diagnostics/karmada-pods.txt 2>&1 || true
+          kubectl --kubeconfig "$HUB" -n karmada-system logs -l app=karmada-controller-manager --tail=500 \
+            > /tmp/fed-diagnostics/karmada-controller-manager.log 2>&1 || true
+          kubectl --kubeconfig "$KARMADA" get clusters -o yaml \
+            > /tmp/fed-diagnostics/karmada-clusters.yaml 2>&1 || true
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: federation-diagnostics
+          path: /tmp/fed-diagnostics
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd test-infra
+          task federation-down \
+            FEDERATION_HUB_CLUSTER=dogfood-hub \
+            FEDERATION_MEMBERS="${{ env.MEMBERS }}"
