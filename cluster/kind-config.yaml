@@ -43,6 +43,6 @@ nodes:
     - hostPath: ${REPO_DIR}/cluster/audit-policy.yaml
       containerPath: /etc/kubernetes/policies/audit-policy.yaml
       readOnly: true
-    - hostPath: ${REPO_DIR}/cluster/containerd-certs.d
+    - hostPath: ${CONTAINERD_CERTS_DIR}
       containerPath: /etc/containerd/certs.d
       readOnly: true

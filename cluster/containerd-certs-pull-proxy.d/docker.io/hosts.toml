@@ -1,0 +1,7 @@
+server = "https://registry-1.docker.io"
+
+[host."http://docker-hub-proxy.docker-hub-proxy.svc.cluster.local"]
+  capabilities = ["pull", "resolve"]
+
+[host."https://mirror.gcr.io"]
+  capabilities = ["pull", "resolve"]
