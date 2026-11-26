@@ -29,6 +29,7 @@ vars:
   REPO_REF: '{{.REPO_REF | default "main"}}'
   # All file paths relative to REPO_DIR
   KIND_CFG: '{{.REPO_DIR}}/cluster/kind-config.yaml'
+  DOCKER_HUB_PULL_PROXY: docker-hub-proxy.docker-hub-proxy.svc.cluster.local
 
 env:
   KIND_VERSION: '{{.KIND_VERSION}}'
@@ -294,6 +295,13 @@ tasks:
           # Export REPO_DIR for envsubst to substitute audit policy path in KIND config
           # KIND doesn't natively support env var substitution, so we preprocess with envsubst
           export REPO_DIR="{{.REPO_DIR}}"
+
+          export CONTAINERD_CERTS_DIR="{{.REPO_DIR}}/cluster/containerd-certs.d"
+          if command -v getent >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
+             timeout 2 getent hosts {{.DOCKER_HUB_PULL_PROXY}} >/dev/null 2>&1; then
+            CONTAINERD_CERTS_DIR="{{.REPO_DIR}}/cluster/containerd-certs-pull-proxy.d"
+            echo "🪞 Pulling Docker Hub images through {{.DOCKER_HUB_PULL_PROXY}}"
+          fi
 
           # Process KIND config and create cluster (--name and --image override config values)
           if envsubst < {{.KIND_CFG}} | kind create cluster --name {{.CLUSTER_NAME}} --image kindest/node:{{.K8S_VERSION}} --config - --kubeconfig {{.KUBECONFIG_FILE}}; then
